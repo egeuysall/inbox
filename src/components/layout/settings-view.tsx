@@ -291,7 +291,10 @@ export function SettingsView() {
 
         <SidebarInset className="min-h-dvh flex flex-col">
           <header className="sticky top-0 z-20 flex h-12 items-center border-b bg-background px-4 md:px-6">
-            <p className="text-sm text-muted-foreground">{"> settings"}</p>
+            <div className="flex items-center gap-2">
+              <SidebarTrigger className="md:hidden" size="icon-sm" variant="ghost" />
+              <p className="text-sm text-muted-foreground">{"> settings"}</p>
+            </div>
           </header>
 
           <main className="min-h-0 flex-1 overflow-y-auto py-4">

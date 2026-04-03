@@ -747,7 +747,14 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
 
   const todoSections = useMemo<TodoSection[]>(() => {
     if (filter === "today") {
-      return [{ key: "today", label: null, todos: filteredTodos }];
+      const todayDateKey = getLocalDateKey(Date.now());
+      return [
+        {
+          key: "today",
+          label: `today // ${formatDateKey(todayDateKey, UTC_SHORT_DATE_FORMATTER)}`,
+          todos: filteredTodos,
+        },
+      ];
     }
 
     const sectionsByDate = new Map<string, { dateKey: string | null; todos: TodoItem[] }>();
@@ -875,6 +882,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
         <SidebarInset className="min-h-dvh flex flex-col">
           <header className="sticky top-0 z-20 flex h-12 items-center border-b bg-background px-4 md:px-6">
             <div className="flex w-full items-center gap-2">
+              <SidebarTrigger className="md:hidden" size="icon-sm" variant="ghost" />
               <span className="text-muted-foreground">{">"}</span>
               <Input
                 ref={promptInputRef}
