@@ -125,6 +125,13 @@ Open [http://localhost:3000](http://localhost:3000), enter `APP_ACCESS_PASSWORD`
 
 ## API Surface
 
+ibx API is available for external integrations using API keys (`iak_...`).
+
+Detailed docs:
+
+- [API Reference](/Users/egeuysal/Developer/inbox/docs/API.md)
+- [Authentication Guide](/Users/egeuysal/Developer/inbox/docs/API_AUTH.md)
+
 Auth/session:
 
 - `POST /api/login`
@@ -156,6 +163,11 @@ Bearer usage:
 ```http
 Authorization: Bearer iak_...
 ```
+
+Integration note:
+
+- Prefer server-to-server usage with Bearer API keys.
+- Keep API keys out of browser bundles and public repos.
 
 ## CLI (`ibx`)
 

@@ -271,7 +271,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   const [expandedNoteIds, setExpandedNoteIds] = useState<Record<string, boolean>>({});
   const [currentTimestamp, setCurrentTimestamp] = useState(() => Date.now());
   const promptInputRef = useRef<HTMLInputElement | null>(null);
-  const hasPlacedInitialCursor = useRef(false);
+  const hasAppliedInitialAutofocus = useRef(false);
   const isQueueFlushRunning = useRef(false);
 
   useEffect(() => {
@@ -430,16 +430,43 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     return () => window.clearInterval(timer);
   }, [flushQueuedPrompts, isAuthenticated, refreshTodos]);
 
-  const placePromptCursorAtEnd = useCallback(() => {
-    const input = promptInputRef.current;
-    if (!input || hasPlacedInitialCursor.current) {
+  const focusPromptInputAtEnd = useCallback((force = false) => {
+    if (!promptAutofocus || isGenerating || isProcessingQueue) {
       return;
     }
 
+    const input = promptInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    const activeElement = document.activeElement;
+    if (
+      !force &&
+      activeElement &&
+      activeElement !== document.body &&
+      activeElement !== input
+    ) {
+      return;
+    }
+
+    input.focus({ preventScroll: true });
     const cursorPosition = input.value.length;
     input.setSelectionRange(cursorPosition, cursorPosition);
-    hasPlacedInitialCursor.current = true;
-  }, []);
+  }, [isGenerating, isProcessingQueue, promptAutofocus]);
+
+  useEffect(() => {
+    if (!promptAutofocus) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      focusPromptInputAtEnd(true);
+      hasAppliedInitialAutofocus.current = true;
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [focusPromptInputAtEnd, promptAutofocus]);
 
   useEffect(() => {
     if (!promptAutofocus) {
@@ -447,19 +474,11 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     }
 
     const animationFrame = window.requestAnimationFrame(() => {
-      const input = promptInputRef.current;
-      if (!input || hasPlacedInitialCursor.current) {
-        return;
-      }
-
-      input.focus({ preventScroll: true });
-      const cursorPosition = input.value.length;
-      input.setSelectionRange(cursorPosition, cursorPosition);
-      hasPlacedInitialCursor.current = true;
+      focusPromptInputAtEnd(!hasAppliedInitialAutofocus.current);
     });
 
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [placePromptCursorAtEnd, promptAutofocus]);
+  }, [focusPromptInputAtEnd, promptAutofocus, searchParams]);
 
   useEffect(() => {
     const viewParam = searchParams.get("view");
@@ -835,7 +854,6 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
                 onChange={(event) => setPromptInput(event.target.value)}
                 placeholder="type once, generate todos"
                 autoFocus={promptAutofocus}
-                onFocus={() => placePromptCursorAtEnd()}
                 className="h-8 border-0 bg-transparent px-0 shadow-none ring-0 focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
