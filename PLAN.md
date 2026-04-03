@@ -1,4 +1,4 @@
-You are building a personal, offline‑first, AI‑powered **thought inbox → todo generator** as a PWA for a single user (Ege). The app is internal, but deployed on the public web, and must be fast, minimal, and reliable. The setup and pnpm packages are already complete, use shadcn for the design 
+You are building a personal, offline‑first, AI‑powered **thought inbox → todo generator** as a PWA for a single user (Ege). The app is internal, but deployed on the public web, and must be fast, minimal, and reliable. The setup and pnpm packages are already complete, use shadcn for the design
 
 ## High‑level product
 
