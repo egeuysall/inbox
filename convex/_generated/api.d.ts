@@ -8,13 +8,23 @@
  * @module
  */
 
+import type * as memories from "../memories.js";
+import type * as sessions from "../sessions.js";
+import type * as thoughts from "../thoughts.js";
+import type * as todos from "../todos.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  memories: typeof memories;
+  sessions: typeof sessions;
+  thoughts: typeof thoughts;
+  todos: typeof todos;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.
