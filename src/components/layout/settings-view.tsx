@@ -56,8 +56,12 @@ function readStoredDefaultView(): DefaultView {
     return "today";
   }
 
-  const stored = window.localStorage.getItem(FILTER_STORAGE_KEY);
-  return stored === "upcoming" || stored === "archive" ? stored : "today";
+  try {
+    const stored = window.localStorage.getItem(FILTER_STORAGE_KEY);
+    return stored === "upcoming" || stored === "archive" ? stored : "today";
+  } catch {
+    return "today";
+  }
 }
 
 function readStoredPromptAutofocus() {
@@ -65,7 +69,11 @@ function readStoredPromptAutofocus() {
     return true;
   }
 
-  return window.localStorage.getItem(PROMPT_AUTOFOCUS_STORAGE_KEY) !== "0";
+  try {
+    return window.localStorage.getItem(PROMPT_AUTOFOCUS_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
 }
 
 function getLocalStatusLabel(timestamp: number) {
@@ -77,8 +85,9 @@ export function SettingsView() {
   const { theme, setTheme } = useTheme();
   const [isClearing, startClearTransition] = useTransition();
   const [isSigningOut, startSignOutTransition] = useTransition();
-  const [defaultView, setDefaultView] = useState<DefaultView>(() => readStoredDefaultView());
-  const [promptAutofocus, setPromptAutofocus] = useState(() => readStoredPromptAutofocus());
+  const [defaultView, setDefaultView] = useState<DefaultView>("today");
+  const [promptAutofocus, setPromptAutofocus] = useState(true);
+  const [hasHydratedPreferences, setHasHydratedPreferences] = useState(false);
   const [keyName, setKeyName] = useState("cli");
   const [createdApiKey, setCreatedApiKey] = useState<string | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
@@ -101,7 +110,11 @@ export function SettingsView() {
     }
 
     setDefaultView(nextView);
-    window.localStorage.setItem(FILTER_STORAGE_KEY, nextView);
+    try {
+      window.localStorage.setItem(FILTER_STORAGE_KEY, nextView);
+    } catch {
+      // Ignore localStorage failures (private mode, blocked storage)
+    }
     toast.message(`startup view set to ${nextView}`);
   };
 
@@ -113,7 +126,11 @@ export function SettingsView() {
 
     const nextAutofocus = nextValue === "on";
     setPromptAutofocus(nextAutofocus);
-    window.localStorage.setItem(PROMPT_AUTOFOCUS_STORAGE_KEY, nextAutofocus ? "1" : "0");
+    try {
+      window.localStorage.setItem(PROMPT_AUTOFOCUS_STORAGE_KEY, nextAutofocus ? "1" : "0");
+    } catch {
+      // Ignore localStorage failures (private mode, blocked storage)
+    }
     toast.message(`prompt autofocus ${nextAutofocus ? "enabled" : "disabled"}`);
   };
 
@@ -146,6 +163,12 @@ export function SettingsView() {
       setIsLoadingKeys(false);
     }
   };
+
+  useEffect(() => {
+    setDefaultView(readStoredDefaultView());
+    setPromptAutofocus(readStoredPromptAutofocus());
+    setHasHydratedPreferences(true);
+  }, []);
 
   useEffect(() => {
     void refreshApiKeys();
@@ -312,6 +335,7 @@ export function SettingsView() {
                     onValueChange={setDefaultViewFromGroup}
                     variant="default"
                     size="sm"
+                    disabled={!hasHydratedPreferences}
                   >
                     <ToggleGroupItem value="today" className={PICKER_ITEM_CLASS}>
                       today
@@ -333,6 +357,7 @@ export function SettingsView() {
                     onValueChange={setPromptAutofocusFromGroup}
                     variant="default"
                     size="sm"
+                    disabled={!hasHydratedPreferences}
                   >
                     <ToggleGroupItem value="on" className={PICKER_ITEM_CLASS}>
                       on

@@ -65,7 +65,13 @@ export function useTheme() {
 
   const setTheme = (nextTheme: ThemePreference) => {
     setThemeState(nextTheme);
-    window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    } catch {
+      // Ignore localStorage failures (private mode, blocked storage)
+    }
+
     applyThemeToDocument(nextTheme);
   };
 

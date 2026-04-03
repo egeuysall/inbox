@@ -102,7 +102,11 @@ function readStoredPromptAutofocus() {
     return true;
   }
 
-  return window.localStorage.getItem(PROMPT_AUTOFOCUS_STORAGE_KEY) !== "0";
+  try {
+    return window.localStorage.getItem(PROMPT_AUTOFOCUS_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
 }
 
 function getLocalDateKey(timestamp: number) {
@@ -257,9 +261,10 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   const isOnline = useOfflineStatus();
 
   const [isAuthenticated, setIsAuthenticated] = useState(initialAuthenticated);
-  const [filter, setFilter] = useState<TodoFilter>(() => readStoredFilter());
-  const [promptInput, setPromptInput] = useState(() => readStoredPromptInput());
-  const [promptAutofocus] = useState(() => readStoredPromptAutofocus());
+  const [filter, setFilter] = useState<TodoFilter>("today");
+  const [promptInput, setPromptInput] = useState("");
+  const [promptAutofocus, setPromptAutofocus] = useState(false);
+  const [hasHydratedPreferences, setHasHydratedPreferences] = useState(false);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [hasLoadedTodos, setHasLoadedTodos] = useState(false);
   const [isLoadingTodos, setIsLoadingTodos] = useState(false);
@@ -275,20 +280,35 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   const isQueueFlushRunning = useRef(false);
 
   useEffect(() => {
+    setFilter(readStoredFilter());
+    setPromptInput(readStoredPromptInput());
+    setPromptAutofocus(readStoredPromptAutofocus());
+    setHasHydratedPreferences(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedPreferences) {
+      return;
+    }
+
     try {
       window.localStorage.setItem(PROMPT_INPUT_STORAGE_KEY, promptInput);
     } catch {
       // Ignore localStorage failures (private mode, blocked storage)
     }
-  }, [promptInput]);
+  }, [hasHydratedPreferences, promptInput]);
 
   useEffect(() => {
+    if (!hasHydratedPreferences) {
+      return;
+    }
+
     try {
       window.localStorage.setItem(FILTER_STORAGE_KEY, filter);
     } catch {
       // Ignore localStorage failures (private mode, blocked storage)
     }
-  }, [filter]);
+  }, [filter, hasHydratedPreferences]);
 
   const refreshTodos = useCallback(async (showLoading = false) => {
     if (!isAuthenticated) {
@@ -456,7 +476,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   }, [isGenerating, isProcessingQueue, promptAutofocus]);
 
   useEffect(() => {
-    if (!promptAutofocus) {
+    if (!hasHydratedPreferences || !promptAutofocus) {
       return;
     }
 
@@ -466,10 +486,10 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [focusPromptInputAtEnd, promptAutofocus]);
+  }, [focusPromptInputAtEnd, hasHydratedPreferences, promptAutofocus]);
 
   useEffect(() => {
-    if (!promptAutofocus) {
+    if (!hasHydratedPreferences || !promptAutofocus) {
       return;
     }
 
@@ -478,9 +498,13 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     });
 
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [focusPromptInputAtEnd, promptAutofocus, searchParams]);
+  }, [focusPromptInputAtEnd, hasHydratedPreferences, promptAutofocus, searchParams]);
 
   useEffect(() => {
+    if (!hasHydratedPreferences) {
+      return;
+    }
+
     const viewParam = searchParams.get("view");
     if (!viewParam) {
       setFilter(readStoredFilter());
@@ -488,9 +512,13 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     }
 
     setFilter(normalizeFilter(viewParam));
-  }, [searchParams]);
+  }, [hasHydratedPreferences, searchParams]);
 
   useEffect(() => {
+    if (!hasHydratedPreferences) {
+      return;
+    }
+
     if (!searchParams.get("view")) {
       const nextFilter = readStoredFilter();
       setFilter(nextFilter);
@@ -498,7 +526,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       params.set("view", nextFilter);
       router.replace(`/?${params.toString()}`, { scroll: false });
     }
-  }, [router, searchParams]);
+  }, [hasHydratedPreferences, router, searchParams]);
 
   useEffect(() => {
     if (!isAuthenticated) {
