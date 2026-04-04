@@ -3,7 +3,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { actionOutput, buildShortcut, variable, withVariables } = require('@joshfarrant/shortcuts-js');
+const { actionOutput, buildShortcut, withVariables } = require('@joshfarrant/shortcuts-js');
 const {
   URL,
   ask,
@@ -12,12 +12,10 @@ const {
   date,
   exitShortcut,
   formatDate,
-  getVariable,
   getContentsOfURL,
   getNetworkDetails,
   getTextFromInput,
   matchText,
-  setVariable,
   text,
 } = require('@joshfarrant/shortcuts-js/actions');
 
@@ -32,7 +30,6 @@ const wifiName = actionOutput('Wi-Fi Name');
 const cellularName = actionOutput('Carrier Name');
 const networkState = actionOutput('Network State');
 const API_KEY_PLACEHOLDER = 'iak_replace_me';
-const queuePayloadVariable = variable('Queue Payload');
 
 function buildApiSubmitAction(textInput) {
   const action = getContentsOfURL({
@@ -161,32 +158,31 @@ const syncActions = [
     value: '',
     ifTrue: [exitShortcut()],
   }),
-  setVariable({ variable: queuePayloadVariable }),
   conditional({
     input: 'Contains',
     value: 'text:',
     ifTrue: [
       matchText(
         {
-          // Extract only the content after `text:` on its line.
-          pattern: '(?m)(?<=^text:\\s).+',
+          // Extract all content after the `text:` line (including new lines).
+          pattern: '(?ims)(?<=^text:\\s)[\\s\\S]+',
           caseSensitive: false,
         },
         extractedQueueText,
       ),
       getTextFromInput({}, extractedQueueTextValue),
-      conditional({
-        input: '=',
-        value: '',
-        ifFalse: [setVariable({ variable: queuePayloadVariable })],
+      URL({
+        url: 'https://ibx.egeuysal.com/api/todos/generate',
       }),
+      buildApiSubmitAction(extractedQueueTextValue),
+    ],
+    ifFalse: [
+      URL({
+        url: 'https://ibx.egeuysal.com/api/todos/generate',
+      }),
+      buildApiSubmitAction(queueNoteInput),
     ],
   }),
-  getVariable({ variable: queuePayloadVariable }),
-  URL({
-    url: 'https://ibx.egeuysal.com/api/todos/generate',
-  }),
-  buildApiSubmitAction(queuePayloadVariable),
 ];
 
 const syncShortcut = buildShortcut(syncActions, {
