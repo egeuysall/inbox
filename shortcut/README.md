@@ -3,7 +3,7 @@
 This directory generates an Apple Shortcut that captures one text input and:
 
 - posts directly to `POST https://ibx.egeuysal.com/api/todos/generate` with `Authorization: Bearer iak_...`
-- if network is unavailable, opens `webapp://ibx.egeuysal.com/capture/...` with payload mirrored in path/query/hash so the PWA can still read it when iOS strips one channel
+- if network is unavailable, opens `https://ibx.egeuysal.com/capture/...` with payload mirrored in path/query/hash so cached Safari/PWA can still read it offline
 
 Important:
 - Open ibx once while online after installing/updating so assets stay warm for offline usage.

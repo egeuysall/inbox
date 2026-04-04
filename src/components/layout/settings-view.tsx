@@ -34,7 +34,7 @@ const PICKER_ITEM_CLASS =
   "border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background";
 const CLI_INSTALL_COMMAND = "curl -fsSL https://ibx.egeuysal.com/install.sh | bash";
 const SHORTCUT_INSTALL_URL =
-  "https://ibx.egeuysal.com/shortcuts/ibx-capture.shortcut?v=20260403-webapp-path";
+  "https://ibx.egeuysal.com/shortcuts/ibx-capture.shortcut?v=20260403-https-path";
 const LOCAL_STATUS_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   weekday: "short",
   month: "short",
