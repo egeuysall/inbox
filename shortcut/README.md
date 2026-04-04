@@ -3,11 +3,11 @@
 This directory generates an Apple Shortcut that captures one text input and:
 
 - posts directly to `POST https://ibx.egeuysal.com/api/todos/generate` with `Authorization: Bearer iak_...`
-- if network is unavailable, uses **Show Web View at** for
-  `https://ibx.egeuysal.com/?shortcut=<encoded-text>&source=shortcut&captureId=<id>&ts=<id>` so each capture is unique and can queue offline
+- if network is unavailable, uses **Open App** (set this action to your installed ibx home-screen app once)
 
 Important:
-- Open ibx once while online after installing/updating so CSS/JS assets are cached for offline web view.
+- After importing the shortcut, edit the **Open App** action and select your ibx home-screen app once.
+- Open ibx once while online after installing/updating so assets stay warm for offline usage.
 
 ## Build shortcut file
 
