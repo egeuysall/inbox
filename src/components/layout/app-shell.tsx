@@ -354,6 +354,12 @@ type TodoSection = {
   todos: TodoItem[];
 };
 
+type ShortcutPayload = {
+  text: string;
+  source: "app" | "shortcut";
+  captureId: string | null;
+};
+
 const TODAY_PRIORITY_LABELS: Record<TodoPriority, string> = {
   1: "p1 // must-do",
   2: "p2 // should-do",
@@ -366,6 +372,88 @@ function normalizeFilter(value: string | null | undefined): TodoFilter {
   }
 
   return "today";
+}
+
+function readHashParams(hash: string) {
+  if (!hash.startsWith("#") || hash.length <= 1) {
+    return new URLSearchParams();
+  }
+
+  return new URLSearchParams(hash.slice(1));
+}
+
+function decodePathShortcutPayload(pathname: string) {
+  const match = pathname.match(/^\/capture\/([^/]+)\/([^/]+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, rawCaptureId, rawText] = match;
+
+  try {
+    return {
+      captureId: decodeURIComponent(rawCaptureId),
+      text: decodeURIComponent(rawText),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readShortcutPayloadFromLocation(location: Location): ShortcutPayload | null {
+  const url = new URL(location.href);
+  const hashParams = readHashParams(url.hash);
+  const pathPayload = decodePathShortcutPayload(url.pathname);
+
+  const text = url.searchParams.get("shortcut")
+    ?? hashParams.get("shortcut")
+    ?? pathPayload?.text
+    ?? null;
+
+  if (!text) {
+    return null;
+  }
+
+  const sourceParam = url.searchParams.get("source") ?? hashParams.get("source");
+  const captureId = url.searchParams.get("captureId")
+    ?? hashParams.get("captureId")
+    ?? pathPayload?.captureId
+    ?? null;
+
+  return {
+    text,
+    source: sourceParam === "shortcut" ? "shortcut" : "app",
+    captureId,
+  };
+}
+
+function clearShortcutPayloadFromLocation(location: Location, fallbackFilter: TodoFilter) {
+  const url = new URL(location.href);
+  const hashParams = readHashParams(url.hash);
+
+  url.searchParams.delete("shortcut");
+  url.searchParams.delete("source");
+  url.searchParams.delete("captureId");
+  url.searchParams.delete("ts");
+
+  hashParams.delete("shortcut");
+  hashParams.delete("source");
+  hashParams.delete("captureId");
+  hashParams.delete("ts");
+
+  if (url.pathname.startsWith("/capture/")) {
+    url.pathname = "/";
+  }
+
+  if (!url.searchParams.get("view")) {
+    url.searchParams.set("view", fallbackFilter);
+  }
+
+  const hashText = hashParams.toString();
+  url.hash = hashText ? `#${hashText}` : "";
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState(null, "", nextUrl);
 }
 
 export function AppShell({ initialAuthenticated }: AppShellProps) {
@@ -403,6 +491,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   const holdStartRef = useRef<{ x: number; y: number } | null>(null);
   const heldTodoIdRef = useRef<string | null>(null);
   const suppressNextClickRef = useRef(false);
+  const isShortcutConsumeRunning = useRef(false);
 
   const clearHoldTimer = useCallback(() => {
     if (holdTimerRef.current !== null) {
@@ -734,82 +823,73 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   }, [hasHydratedPreferences, router, searchParams]);
 
   useEffect(() => {
-    const queryShortcutText = searchParams.get("shortcut");
-    const hashParams =
-      typeof window !== "undefined" && window.location.hash.startsWith("#")
-        ? new URLSearchParams(window.location.hash.slice(1))
-        : null;
-    const shortcutText = queryShortcutText ?? hashParams?.get("shortcut");
-    if (!shortcutText) {
+    if (typeof window === "undefined") {
       return;
     }
 
-    const captureId =
-      searchParams.get("captureId") ?? hashParams?.get("captureId");
-    const dedupeKey = captureId
-      ? `${SHORTCUT_CAPTURE_KEY_PREFIX}${captureId}`
-      : null;
-
-    const clearShortcutParams = () => {
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete("shortcut");
-      params.delete("source");
-      params.delete("captureId");
-      params.delete("ts");
-      if (!params.get("view")) {
-        params.set("view", filter);
-      }
-      router.replace(`/?${params.toString()}`, { scroll: false });
-
-      if (typeof window !== "undefined" && window.location.hash.length > 1) {
-        const cleaned = `${window.location.pathname}${window.location.search}`;
-        window.history.replaceState(null, "", cleaned);
-      }
-    };
-
-    if (
-      dedupeKey &&
-      typeof window !== "undefined" &&
-      window.sessionStorage.getItem(dedupeKey)
-    ) {
-      clearShortcutParams();
-      return;
-    }
-
-    if (dedupeKey && typeof window !== "undefined") {
-      window.sessionStorage.setItem(dedupeKey, "1");
-    }
-
-    const sourceParam = searchParams.get("source") ?? hashParams?.get("source");
-    const source = sourceParam === "shortcut" ? "shortcut" : "app";
-
-    void (async () => {
-      const queuedId = await queuePrompt(shortcutText, source);
-      if (!queuedId) {
-        clearShortcutParams();
+    const consumeShortcutPayload = async () => {
+      const payload = readShortcutPayloadFromLocation(window.location);
+      if (!payload || isShortcutConsumeRunning.current) {
         return;
       }
 
-      if (isOnline && isAuthenticated) {
-        toast.message("shortcut received. generating todos…");
-        await flushQueuedPrompts();
-      } else if (!isOnline) {
-        toast.message("shortcut received offline. queued for next connection.");
-      } else {
-        toast.message("shortcut received. sign in to process queued items.");
+      const dedupeKey = payload.captureId
+        ? `${SHORTCUT_CAPTURE_KEY_PREFIX}${payload.captureId}`
+        : null;
+
+      if (dedupeKey && window.sessionStorage.getItem(dedupeKey)) {
+        clearShortcutPayloadFromLocation(window.location, filter);
+        return;
       }
 
-      clearShortcutParams();
-    })();
-  }, [
-    filter,
-    flushQueuedPrompts,
-    isAuthenticated,
-    isOnline,
-    queuePrompt,
-    router,
-    searchParams,
-  ]);
+      isShortcutConsumeRunning.current = true;
+      try {
+        if (dedupeKey) {
+          window.sessionStorage.setItem(dedupeKey, "1");
+        }
+
+        const queuedId = await queuePrompt(payload.text, payload.source);
+        if (!queuedId) {
+          clearShortcutPayloadFromLocation(window.location, filter);
+          return;
+        }
+
+        if (isOnline && isAuthenticated) {
+          toast.message("shortcut received. generating todos…");
+          await flushQueuedPrompts();
+        } else if (!isOnline) {
+          toast.message("shortcut received offline. queued for next connection.");
+        } else {
+          toast.message("shortcut received. sign in to process queued items.");
+        }
+
+        clearShortcutPayloadFromLocation(window.location, filter);
+      } finally {
+        isShortcutConsumeRunning.current = false;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void consumeShortcutPayload();
+      }
+    };
+
+    void consumeShortcutPayload();
+    window.addEventListener("pageshow", consumeShortcutPayload);
+    window.addEventListener("focus", consumeShortcutPayload);
+    window.addEventListener("hashchange", consumeShortcutPayload);
+    window.addEventListener("popstate", consumeShortcutPayload);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pageshow", consumeShortcutPayload);
+      window.removeEventListener("focus", consumeShortcutPayload);
+      window.removeEventListener("hashchange", consumeShortcutPayload);
+      window.removeEventListener("popstate", consumeShortcutPayload);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [filter, flushQueuedPrompts, isAuthenticated, isOnline, queuePrompt]);
 
   const setActiveFilter = useCallback(
     (nextFilter: TodoFilter) => {
