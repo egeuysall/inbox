@@ -1,4 +1,4 @@
-const CACHE_VERSION = "ibx-shell-v3";
+const CACHE_VERSION = "ibx-shell-v4";
 const SHELL_FILES = ["/", "/manifest.webmanifest", "/favicon.ico"];
 
 self.addEventListener("install", (event) => {
@@ -37,20 +37,26 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.pathname.startsWith("/_next/") || request.destination === "script" || request.destination === "style") {
-    return;
-  }
-
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
         .then((response) => {
           const responseCopy = response.clone();
-          void caches.open(CACHE_VERSION).then((cache) => cache.put("/", responseCopy));
+          void caches.open(CACHE_VERSION).then((cache) => {
+            cache.put(request, responseCopy);
+            if (url.pathname === "/") {
+              return;
+            }
+            return cache.put("/", response.clone());
+          });
           return response;
         })
         .catch(async () => {
           const cache = await caches.open(CACHE_VERSION);
+          const cachedPage = await cache.match(request);
+          if (cachedPage) {
+            return cachedPage;
+          }
           const cachedShell = await cache.match("/");
           return cachedShell || new Response("Offline", { status: 503 });
         }),
@@ -58,19 +64,52 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (["font", "image"].includes(request.destination)) {
+  if (
+    url.pathname.startsWith("/_next/") ||
+    ["script", "style", "font", "image", "manifest"].includes(request.destination)
+  ) {
     event.respondWith(
-      caches.match(request).then((cached) => {
+      caches.open(CACHE_VERSION).then((cache) =>
+        cache.match(request).then((cached) => {
+          const networkFetch = fetch(request)
+            .then((response) => {
+              if (response.ok) {
+                void cache.put(request, response.clone());
+              }
+              return response;
+            })
+            .catch(() => null);
+
+          if (cached) {
+            void networkFetch;
+            return cached;
+          }
+
+          return networkFetch.then(
+            (response) => response || new Response("Offline", { status: 503 }),
+          );
+        }),
+      ),
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.open(CACHE_VERSION).then((cache) =>
+      cache.match(request).then((cached) => {
         if (cached) {
           return cached;
         }
 
-        return fetch(request).then((response) => {
-          const responseCopy = response.clone();
-          void caches.open(CACHE_VERSION).then((cache) => cache.put(request, responseCopy));
-          return response;
-        });
+        return fetch(request)
+          .then((response) => {
+            if (response.ok) {
+              void cache.put(request, response.clone());
+            }
+            return response;
+          })
+          .catch(() => new Response("Offline", { status: 503 }));
       }),
-    );
-  }
+    ),
+  );
 });

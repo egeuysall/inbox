@@ -12,7 +12,6 @@ const {
   exitShortcut,
   getContentsOfURL,
   getNetworkDetails,
-  openURLs,
   showResult,
   text,
 } = require('@joshfarrant/shortcuts-js/actions');
@@ -24,6 +23,15 @@ const wifiName = actionOutput('Wi-Fi Name');
 const cellularName = actionOutput('Carrier Name');
 const networkState = actionOutput('Network State');
 const API_KEY_PLACEHOLDER = 'iak_replace_me';
+
+function showWebView() {
+  return {
+    WFWorkflowActionIdentifier: 'is.workflow.actions.showwebpage',
+    WFWorkflowActionParameters: {
+      WFEnterSafariReader: false,
+    },
+  };
+}
 
 function buildApiSubmitAction() {
   const action = getContentsOfURL({
@@ -118,8 +126,8 @@ const actions = [
       text({
         text: withVariables`https://ibx.egeuysal.com/?shortcut=${encodedInput}&source=shortcut`,
       }),
-      openURLs(),
-      showResult({ text: 'offline: opened ibx app to queue locally' }),
+      showWebView(),
+      showResult({ text: 'offline: opened ibx web view (works after app assets are cached)' }),
     ],
     ifFalse: [
       URL({
