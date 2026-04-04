@@ -17,7 +17,7 @@ export default function AppleIcon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#f8f8f8",
+          background: "transparent",
           color: "#000000",
           fontFamily: '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
           fontSize: 90,

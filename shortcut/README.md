@@ -3,7 +3,7 @@
 This directory generates an Apple Shortcut that captures one text input and:
 
 - posts directly to `POST https://ibx.egeuysal.com/api/todos/generate` with `Authorization: Bearer iak_...`
-- if network is unavailable, opens `https://ibx.egeuysal.com/capture/...` with payload mirrored in path/query/hash so cached Safari/PWA can still read it offline
+- if network is unavailable, stores the capture in a local Notes entry prefixed with `IBX_QUEUE`
 
 Important:
 - Open ibx once while online after installing/updating so assets stay warm for offline usage.
@@ -29,4 +29,23 @@ Output files:
 The shortcut contains a text action named `API Key (Edit Once)` with `iak_replace_me`.
 Edit that action one time after install and set your real `iak_...` key.
 After that, it sends directly to API when online without asking every run.
-If your PWA is already installed and warmed, this `webapp://` launch opens the app shell offline and syncs when internet returns.
+
+## Offline queue strategy
+
+When offline, this shortcut writes:
+
+```text
+IBX_QUEUE
+captureId: ...
+createdAt: ...
+text: ...
+```
+
+to Notes. This avoids unreliable PWA URL handoff on iOS.
+
+Then use a separate personal automation/shortcut to:
+
+1. Find notes containing `IBX_QUEUE`
+2. Extract the `text:` line
+3. `POST https://ibx.egeuysal.com/api/todos/generate` with `Authorization: Bearer iak_...`
+4. Delete/archive processed notes

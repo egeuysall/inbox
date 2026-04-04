@@ -9,12 +9,12 @@ const {
   URLEncode,
   ask,
   conditional,
+  createNote,
   date,
   exitShortcut,
   formatDate,
   getContentsOfURL,
   getNetworkDetails,
-  openURLs,
   showResult,
   text,
 } = require('@joshfarrant/shortcuts-js/actions');
@@ -133,10 +133,10 @@ const actions = [
     value: '',
     ifTrue: [
       text({
-        text: withVariables`https://ibx.egeuysal.com/capture/${captureId}/${encodedInput}?shortcut=${encodedInput}&source=shortcut&captureId=${captureId}&ts=${captureId}#shortcut=${encodedInput}&source=shortcut&captureId=${captureId}&ts=${captureId}`,
+        text: withVariables`IBX_QUEUE\ncaptureId: ${captureId}\ncreatedAt: ${captureId}\ntext: ${thoughtInput}`,
       }),
-      openURLs(),
-      showResult({ text: 'offline: launched ibx PWA for local capture queue' }),
+      createNote(),
+      showResult({ text: 'offline: saved to local queue note (IBX_QUEUE)' }),
     ],
     ifFalse: [
       URL({
