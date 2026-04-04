@@ -109,6 +109,7 @@ Creates todos from a previously synced thought.
 - `GET /api/todos`
 - `POST /api/todos/generate`
 - `PATCH /api/todos/:todoId`
+- `DELETE /api/todos/:todoId`
 
 #### POST /api/todos/generate
 
@@ -147,6 +148,10 @@ Valid values:
 - `priority`: `1 | 2 | 3`
 - `recurrence`: `none | daily | weekly | monthly`
 - `dueDate`: `YYYY-MM-DD` or `null`
+
+#### DELETE /api/todos/:todoId
+
+Deletes a todo by id.
 
 ## API key management endpoints
 

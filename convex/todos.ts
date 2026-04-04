@@ -247,6 +247,21 @@ export const updateStatus = mutation({
   },
 });
 
+export const deleteOne = mutation({
+  args: {
+    todoId: v.id("todos"),
+  },
+  handler: async (ctx, args) => {
+    const existingTodo = await ctx.db.get(args.todoId);
+    if (!existingTodo) {
+      return null;
+    }
+
+    await ctx.db.delete(args.todoId);
+    return args.todoId;
+  },
+});
+
 export const updateSchedule = mutation({
   args: {
     todoId: v.id("todos"),

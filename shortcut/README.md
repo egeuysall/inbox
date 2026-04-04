@@ -1,10 +1,10 @@
 # ibx Apple Shortcut
 
-This directory generates an Apple Shortcut that captures one text input and opens:
+This directory generates an Apple Shortcut that captures one text input and:
 
-- `https://ibx.egeuysal.com/?shortcut=<encoded-text>&source=shortcut`
-
-The web app ingests this text, saves it to IndexedDB immediately, and sends it to AI when online.
+- posts directly to `POST https://ibx.egeuysal.com/api/todos/generate` with `Authorization: Bearer iak_...`
+- if network is unavailable, opens
+  `https://ibx.egeuysal.com/?shortcut=<encoded-text>&source=shortcut` so the app can queue it offline
 
 ## Build shortcut file
 
@@ -24,4 +24,5 @@ Output files:
 2. Import into the Shortcuts app.
 3. Run `ibx capture`, type your thought, submit.
 
-If your PWA is already installed, iOS will open the same app URL and the app will queue offline automatically.
+The shortcut asks for an API key (`iak_...`) and sends directly to API when online.
+If your PWA is already installed, iOS can open the same app URL and queue locally when offline.

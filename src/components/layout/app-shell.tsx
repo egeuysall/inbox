@@ -944,6 +944,25 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     }
   };
 
+  const deleteTodo = async (todo: TodoItem) => {
+    const shouldDelete = window.confirm(`delete "${todo.title}"?`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setPendingTodoId(todo.id);
+    try {
+      await apiClient.deleteTodo(todo.id);
+      setEditingTodoId((current) => (current === todo.id ? null : current));
+      toast.message("todo deleted");
+      await refreshTodos();
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    } finally {
+      setPendingTodoId(null);
+    }
+  };
+
   const groupedTodos = useMemo(() => {
     const todayDateKey = getLocalDateKey(Date.now());
     const openTodos = todos.filter((todo) => todo.status === "open");
@@ -1462,6 +1481,19 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
                                   monthly
                                 </ToggleGroupItem>
                               </ToggleGroup>
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={pendingTodoId === todo.id}
+                                onClick={() => {
+                                  void deleteTodo(todo);
+                                }}
+                                onPointerDown={(event) =>
+                                  event.stopPropagation()
+                                }
+                              >
+                                delete
+                              </Button>
                             </div>
                           ) : null}
                         </div>

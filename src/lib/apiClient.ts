@@ -168,4 +168,10 @@ export const apiClient = {
       body: JSON.stringify(payload),
     });
   },
+
+  async deleteTodo(todoId: string) {
+    return requestJson<{ ok: true }>(`/api/todos/${todoId}`, {
+      method: "DELETE",
+    });
+  },
 };

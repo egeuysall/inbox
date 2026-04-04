@@ -221,8 +221,9 @@ Import one of:
 Shortcut behavior:
 
 - asks for text input
-- opens `https://ibx.egeuysal.com/?shortcut=...&source=shortcut`
-- app queues prompt locally if offline and auto-flushes later when online
+- asks for API key (`iak_...`)
+- sends direct API request to `POST /api/todos/generate` when online
+- falls back to opening `https://ibx.egeuysal.com/?shortcut=...&source=shortcut` when offline
 
 ## Security Notes
 

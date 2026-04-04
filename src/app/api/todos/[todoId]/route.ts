@@ -98,3 +98,31 @@ export async function PATCH(
 
   return NextResponse.json({ ok: true });
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ todoId: string }> },
+) {
+  const auth = await getRouteAuth(request);
+  if (!auth) {
+    return unauthorizedJson();
+  }
+  const csrfError = validateCsrfForSessionAuth(request, auth);
+  if (csrfError) {
+    return csrfError;
+  }
+
+  const resolvedParams = await params;
+  const todoId = resolvedParams.todoId?.trim();
+
+  if (!todoId || todoId.length > 64) {
+    return NextResponse.json({ error: "Invalid todo id." }, { status: 400 });
+  }
+
+  const todoApi = api as unknown as { todos: { deleteOne: unknown } };
+  await convex.mutation(todoApi.todos.deleteOne as never, {
+    todoId: todoId as never,
+  });
+
+  return NextResponse.json({ ok: true });
+}

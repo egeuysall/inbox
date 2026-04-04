@@ -4,11 +4,54 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { actionOutput, buildShortcut, withVariables } = require('@joshfarrant/shortcuts-js');
-const { ask, text, URLEncode, openURLs, showResult } = require('@joshfarrant/shortcuts-js/actions');
+const {
+  URL,
+  URLEncode,
+  ask,
+  conditional,
+  exitShortcut,
+  getContentsOfURL,
+  getNetworkDetails,
+  openURLs,
+  showResult,
+  text,
+} = require('@joshfarrant/shortcuts-js/actions');
 
 const thoughtInput = actionOutput('Thought Input');
+const apiKeyInput = actionOutput('API Key Input');
 const encodedInput = actionOutput('Encoded Input');
-const finalUrl = actionOutput('Final URL');
+const wifiName = actionOutput('Wi-Fi Name');
+const cellularName = actionOutput('Carrier Name');
+const networkState = actionOutput('Network State');
+
+function buildApiSubmitAction() {
+  const action = getContentsOfURL({
+    method: 'POST',
+    requestBodyType: 'JSON',
+    headers: {
+      Authorization: 'Bearer iak_placeholder',
+    },
+    requestBody: {
+      text: 'placeholder',
+    },
+  });
+
+  const headers = action?.WFWorkflowActionParameters?.WFHTTPHeaders?.Value?.WFDictionaryFieldValueItems;
+  const bodyFields = action?.WFWorkflowActionParameters?.WFJSONValues?.Value?.WFDictionaryFieldValueItems;
+  if (!Array.isArray(headers) || !Array.isArray(bodyFields)) {
+    throw new Error('failed to build shortcut API action');
+  }
+
+  const authorizationHeader = headers.find((item) => item?.WFKey?.Value?.string === 'Authorization');
+  const textField = bodyFields.find((item) => item?.WFKey?.Value?.string === 'text');
+  if (!authorizationHeader || !textField) {
+    throw new Error('failed to configure shortcut API action');
+  }
+
+  authorizationHeader.WFValue = withVariables`Bearer ${apiKeyInput}`;
+  textField.WFValue = withVariables`${thoughtInput}`;
+  return action;
+}
 
 const actions = [
   ask(
@@ -25,14 +68,68 @@ const actions = [
     },
     encodedInput,
   ),
+  ask(
+    {
+      inputType: 'Text',
+      question: 'enter your ibx api key (iak_...)',
+      defaultAnswer: '',
+    },
+    apiKeyInput,
+  ),
+  conditional({
+    input: '=',
+    value: '',
+    ifTrue: [
+      showResult({ text: 'api key required (starts with iak_)' }),
+      exitShortcut(),
+    ],
+  }),
+  conditional({
+    input: 'Contains',
+    value: 'iak_',
+    ifFalse: [
+      showResult({ text: 'invalid api key format. expected iak_...' }),
+      exitShortcut(),
+    ],
+  }),
+  getNetworkDetails(
+    {
+      network: 'Wi-Fi',
+      attribute: 'Network Name',
+    },
+    wifiName,
+  ),
+  getNetworkDetails(
+    {
+      network: 'Cellular',
+      attribute: 'Carrier Name',
+    },
+    cellularName,
+  ),
   text(
     {
-      text: withVariables`https://ibx.egeuysal.com/?shortcut=${encodedInput}&source=shortcut`,
+      text: withVariables`${wifiName}${cellularName}`,
     },
-    finalUrl,
+    networkState,
   ),
-  openURLs(),
-  showResult({ text: 'sent to ibx' }),
+  conditional({
+    input: '=',
+    value: '',
+    ifTrue: [
+      text({
+        text: withVariables`https://ibx.egeuysal.com/?shortcut=${encodedInput}&source=shortcut`,
+      }),
+      openURLs(),
+      showResult({ text: 'offline: opened ibx app to queue locally' }),
+    ],
+    ifFalse: [
+      URL({
+        url: 'https://ibx.egeuysal.com/api/todos/generate',
+      }),
+      buildApiSubmitAction(),
+      showResult({ text: 'sent to ibx api' }),
+    ],
+  }),
 ];
 
 const shortcut = buildShortcut(actions, {
