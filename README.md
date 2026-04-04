@@ -222,7 +222,7 @@ Import one of:
 Shortcut behavior:
 
 - asks for text input
-- asks for API key (`iak_...`)
+- includes `API Key (Edit Once)` text action (`iak_replace_me`) you set once after install
 - sends direct API request to `POST /api/todos/generate` when online
 - falls back to opening `https://ibx.egeuysal.com/?shortcut=...&source=shortcut` when offline
 

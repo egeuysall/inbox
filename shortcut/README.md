@@ -24,5 +24,7 @@ Output files:
 2. Import into the Shortcuts app.
 3. Run `ibx capture`, type your thought, submit.
 
-The shortcut asks for an API key (`iak_...`) and sends directly to API when online.
+The shortcut contains a text action named `API Key (Edit Once)` with `iak_replace_me`.
+Edit that action one time after install and set your real `iak_...` key.
+After that, it sends directly to API when online without asking every run.
 If your PWA is already installed, iOS can open the same app URL and queue locally when offline.

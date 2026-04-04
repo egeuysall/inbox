@@ -18,11 +18,12 @@ const {
 } = require('@joshfarrant/shortcuts-js/actions');
 
 const thoughtInput = actionOutput('Thought Input');
-const apiKeyInput = actionOutput('API Key Input');
+const apiKeyInput = actionOutput('API Key (Edit Once)');
 const encodedInput = actionOutput('Encoded Input');
 const wifiName = actionOutput('Wi-Fi Name');
 const cellularName = actionOutput('Carrier Name');
 const networkState = actionOutput('Network State');
+const API_KEY_PLACEHOLDER = 'iak_replace_me';
 
 function buildApiSubmitAction() {
   const action = getContentsOfURL({
@@ -68,19 +69,17 @@ const actions = [
     },
     encodedInput,
   ),
-  ask(
+  text(
     {
-      inputType: 'Text',
-      question: 'enter your ibx api key (iak_...)',
-      defaultAnswer: '',
+      text: API_KEY_PLACEHOLDER,
     },
     apiKeyInput,
   ),
   conditional({
     input: '=',
-    value: '',
+    value: API_KEY_PLACEHOLDER,
     ifTrue: [
-      showResult({ text: 'api key required (starts with iak_)' }),
+      showResult({ text: 'edit "API Key (Edit Once)" text action and set your iak_... key' }),
       exitShortcut(),
     ],
   }),
