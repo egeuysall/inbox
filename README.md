@@ -20,6 +20,15 @@ Deployed URL: [https://ibx.egeuysal.com](https://ibx.egeuysal.com)
 
 If offline, prompts stay queued and are sent when connectivity returns.
 
+## Keyboard Shortcuts
+
+- `Alt + 1` → switch to `today` view
+- `Alt + 2` → switch to `upcoming` view
+- `Alt + 3` → switch to `archive` view
+- `Cmd/Ctrl + Shift + K` → focus the prompt input (`> type once, generate todos`)
+- `Enter` (inside prompt input) → submit prompt and generate todos
+- `Cmd/Ctrl + B` → toggle sidebar
+
 ## Moving Parts
 
 ### Frontend (Next.js app router)

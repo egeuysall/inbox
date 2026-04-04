@@ -925,19 +925,19 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       }
 
       if (!event.metaKey && !event.ctrlKey && !event.shiftKey && event.altKey) {
-        if (event.key === "1") {
+        if (event.code === "Digit1" || event.key === "1") {
           event.preventDefault();
           setActiveFilter("today");
           return;
         }
 
-        if (event.key === "2") {
+        if (event.code === "Digit2" || event.key === "2") {
           event.preventDefault();
           setActiveFilter("upcoming");
           return;
         }
 
-        if (event.key === "3") {
+        if (event.code === "Digit3" || event.key === "3") {
           event.preventDefault();
           setActiveFilter("archive");
         }
