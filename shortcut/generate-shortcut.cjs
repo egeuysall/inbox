@@ -15,7 +15,6 @@ const {
   formatDate,
   getContentsOfURL,
   getNetworkDetails,
-  showResult,
   text,
 } = require('@joshfarrant/shortcuts-js/actions');
 
@@ -95,18 +94,12 @@ const actions = [
   conditional({
     input: '=',
     value: API_KEY_PLACEHOLDER,
-    ifTrue: [
-      showResult({ text: 'edit "API Key (Edit Once)" text action and set your iak_... key' }),
-      exitShortcut(),
-    ],
+    ifTrue: [exitShortcut()],
   }),
   conditional({
     input: 'Contains',
     value: 'iak_',
-    ifFalse: [
-      showResult({ text: 'invalid api key format. expected iak_...' }),
-      exitShortcut(),
-    ],
+    ifFalse: [exitShortcut()],
   }),
   getNetworkDetails(
     {
@@ -136,14 +129,12 @@ const actions = [
         text: withVariables`IBX_QUEUE\ncaptureId: ${captureId}\ncreatedAt: ${captureId}\ntext: ${thoughtInput}`,
       }),
       createNote(),
-      showResult({ text: 'offline: saved to local queue note (IBX_QUEUE)' }),
     ],
     ifFalse: [
       URL({
         url: 'https://ibx.egeuysal.com/api/todos/generate',
       }),
       buildApiSubmitAction(),
-      showResult({ text: 'sent to ibx api' }),
     ],
   }),
 ];
