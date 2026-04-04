@@ -1,6 +1,6 @@
 import type { GeneratedTodo } from "@/lib/ai";
 
-const MAX_TODOS_TODAY = 5;
+const MAX_TODOS_TODAY = 30;
 
 type ExistingTodo = {
   title: string;

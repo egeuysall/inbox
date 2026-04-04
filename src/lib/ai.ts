@@ -155,7 +155,7 @@ Rules:
 - Only use a different dueDate when the prompt explicitly states another time/date (e.g. tomorrow, this weekend, next week, on Friday, specific date).
 - If the prompt uses relative timing, convert it to a concrete YYYY-MM-DD date.
 - Set priority: 1=must-do today, 2=important, 3=nice-to-have.
-- Keep at most 5 todos.
+- Keep at most 30 todos.
 - If no actionable todos exist, return [].
 
 About Ege:

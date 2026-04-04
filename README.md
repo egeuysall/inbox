@@ -15,7 +15,7 @@ Deployed URL: [https://ibx.egeuysal.com](https://ibx.egeuysal.com)
 1. You type one thought in the top input (`> type once, generate todos`).
 2. The input is saved to local IndexedDB queue immediately.
 3. If online and authenticated, queued prompts are flushed to `/api/todos/generate`.
-4. AI returns at most 5 actionable todos with date/priority/recurrence.
+4. AI returns at most 30 actionable todos with date/priority/recurrence.
 5. Todos are persisted in Convex and shown in `today`, `upcoming`, and `archive`.
 
 If offline, prompts stay queued and are sent when connectivity returns.
@@ -259,7 +259,7 @@ From repo root:
 
 - UI is intentionally minimal and terminal-inspired (pure black/white, Geist Mono).
 - Todo generation is intentionally constrained:
-  - max 5 new todos per AI run
+  - max 30 new todos per AI run
   - duplicate filtering
   - recurrence/priority normalization
   - due date auto-rescheduling safeguards
