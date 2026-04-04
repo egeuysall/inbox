@@ -700,12 +700,18 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   }, [hasHydratedPreferences, router, searchParams]);
 
   useEffect(() => {
-    const shortcutText = searchParams.get("shortcut");
+    const queryShortcutText = searchParams.get("shortcut");
+    const hashParams =
+      typeof window !== "undefined" && window.location.hash.startsWith("#")
+        ? new URLSearchParams(window.location.hash.slice(1))
+        : null;
+    const shortcutText = queryShortcutText ?? hashParams?.get("shortcut");
     if (!shortcutText) {
       return;
     }
 
-    const captureId = searchParams.get("captureId");
+    const captureId =
+      searchParams.get("captureId") ?? hashParams?.get("captureId");
     const dedupeKey = captureId
       ? `${SHORTCUT_CAPTURE_KEY_PREFIX}${captureId}`
       : null;
@@ -720,6 +726,11 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
         params.set("view", filter);
       }
       router.replace(`/?${params.toString()}`, { scroll: false });
+
+      if (typeof window !== "undefined" && window.location.hash.length > 1) {
+        const cleaned = `${window.location.pathname}${window.location.search}`;
+        window.history.replaceState(null, "", cleaned);
+      }
     };
 
     if (
@@ -735,8 +746,8 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       window.sessionStorage.setItem(dedupeKey, "1");
     }
 
-    const source =
-      searchParams.get("source") === "shortcut" ? "shortcut" : "app";
+    const sourceParam = searchParams.get("source") ?? hashParams?.get("source");
+    const source = sourceParam === "shortcut" ? "shortcut" : "app";
 
     void (async () => {
       const queuedId = await queuePrompt(shortcutText, source);
