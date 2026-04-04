@@ -34,9 +34,9 @@ const PICKER_ITEM_CLASS =
   "border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background";
 const CLI_INSTALL_COMMAND = "curl -fsSL https://ibx.egeuysal.com/install.sh | bash";
 const SHORTCUT_INSTALL_URL =
-  "https://ibx.egeuysal.com/shortcuts/ibx-capture.shortcut?v=20260404-dual-shortcuts";
+  "https://ibx.egeuysal.com/shortcuts/ibx-capture.shortcut?v=20260404-dual-shortcuts-v2";
 const SHORTCUT_SYNC_INSTALL_URL =
-  "https://ibx.egeuysal.com/shortcuts/ibx-sync-queue.shortcut?v=20260404-dual-shortcuts";
+  "https://ibx.egeuysal.com/shortcuts/ibx-sync-queue.shortcut?v=20260404-dual-shortcuts-v2";
 const LOCAL_STATUS_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   weekday: "short",
   month: "short",

@@ -23,6 +23,7 @@ const thoughtInput = actionOutput('Thought Input');
 const queueNoteInput = actionOutput('Queue Note Input');
 const extractedQueueText = actionOutput('Extracted Queue Text');
 const extractedQueueTextValue = actionOutput('Extracted Queue Text Value');
+const queuePayloadText = actionOutput('Queue Payload Text');
 const apiKeyInput = actionOutput('API Key (Edit Once)');
 const currentDate = actionOutput('Current Date');
 const captureId = actionOutput('Capture ID');
@@ -151,23 +152,10 @@ const captureShortcut = buildShortcut(captureActions, {
 });
 
 const syncActions = [
-  ...sharedApiKeyActions(),
   getTextFromInput({}, queueNoteInput),
   conditional({
     input: '=',
     value: '',
-    ifTrue: [exitShortcut()],
-  }),
-  conditional({
-    // Guard against accidental "no input" runs where previous output can be the API key.
-    input: '=',
-    value: withVariables`${apiKeyInput}`,
-    ifTrue: [exitShortcut()],
-  }),
-  conditional({
-    // Extra guard: if input still looks like an API key, never post.
-    input: 'Contains',
-    value: 'iak_',
     ifTrue: [exitShortcut()],
   }),
   conditional({
@@ -186,21 +174,44 @@ const syncActions = [
       conditional({
         input: '=',
         value: '',
-        ifTrue: [exitShortcut()],
+        ifTrue: [
+          text(
+            {
+              text: withVariables`${queueNoteInput}`,
+            },
+            queuePayloadText,
+          ),
+        ],
+        ifFalse: [
+          text(
+            {
+              text: withVariables`${extractedQueueTextValue}`,
+            },
+            queuePayloadText,
+          ),
+        ],
       }),
-      URL({
-        url: 'https://ibx.egeuysal.com/api/todos/generate',
-      }),
-      buildApiSubmitAction(extractedQueueTextValue),
     ],
     ifFalse: [
-      // Fallback for Notes inputs that don't preserve the exact `text:` marker.
-      URL({
-        url: 'https://ibx.egeuysal.com/api/todos/generate',
-      }),
-      buildApiSubmitAction(queueNoteInput),
+      text(
+        {
+          text: withVariables`${queueNoteInput}`,
+        },
+        queuePayloadText,
+      ),
     ],
   }),
+  // Payload is now isolated from auth actions and cannot accidentally become API key.
+  conditional({
+    input: 'Contains',
+    value: 'iak_',
+    ifTrue: [exitShortcut()],
+  }),
+  ...sharedApiKeyActions(),
+  URL({
+    url: 'https://ibx.egeuysal.com/api/todos/generate',
+  }),
+  buildApiSubmitAction(queuePayloadText),
 ];
 
 const syncShortcut = buildShortcut(syncActions, {
