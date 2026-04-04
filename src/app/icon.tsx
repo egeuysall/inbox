@@ -17,14 +17,26 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#0a0a0a",
-          color: "#f4f4f5",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: 220,
-          fontWeight: 700,
         }}
       >
-        &gt;
+        <div
+          style={{
+            width: "86%",
+            height: "86%",
+            borderRadius: "999px",
+            background: "#000000",
+            color: "#ffffff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: 220,
+            fontWeight: 700,
+            lineHeight: 1,
+          }}
+        >
+          &gt;
+        </div>
       </div>
     ),
     {

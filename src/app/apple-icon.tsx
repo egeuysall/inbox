@@ -17,14 +17,26 @@ export default function AppleIcon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#f9f9f9",
-          color: "#0a0a0a",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: 90,
-          fontWeight: 700,
         }}
       >
-        &gt;
+        <div
+          style={{
+            width: "86%",
+            height: "86%",
+            borderRadius: "999px",
+            background: "#000000",
+            color: "#ffffff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: 90,
+            fontWeight: 700,
+            lineHeight: 1,
+          }}
+        >
+          &gt;
+        </div>
       </div>
     ),
     {
