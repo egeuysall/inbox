@@ -178,6 +178,47 @@ Integration note:
 - Prefer server-to-server usage with Bearer API keys.
 - Keep API keys out of browser bundles and public repos.
 
+API curl examples:
+
+```bash
+IBX_BASE_URL="https://ibx.egeuysal.com"
+IBX_API_KEY="iak_your_key_here"
+TODAY_UTC="$(date -u +%F)"
+YESTERDAY_UTC="$(date -u -v-1d +%F 2>/dev/null || date -u -d 'yesterday' +%F)"
+
+# fetch today's tasks
+curl -sS "$IBX_BASE_URL/api/todos?today=$TODAY_UTC" \
+  -H "Authorization: Bearer $IBX_API_KEY" \
+  -H "Content-Type: application/json"
+
+# fetch yesterday's tasks
+curl -sS "$IBX_BASE_URL/api/todos?today=$YESTERDAY_UTC" \
+  -H "Authorization: Bearer $IBX_API_KEY" \
+  -H "Content-Type: application/json"
+
+# fetch tasks for a specific date
+curl -sS "$IBX_BASE_URL/api/todos?today=2026-04-03" \
+  -H "Authorization: Bearer $IBX_API_KEY" \
+  -H "Content-Type: application/json"
+
+# generate todos from free text
+curl -sS -X POST "$IBX_BASE_URL/api/todos/generate" \
+  -H "Authorization: Bearer $IBX_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Plan next week: finalize landing page, follow up with 8 leads, and schedule gym"}'
+
+# mark a todo as done
+curl -sS -X PATCH "$IBX_BASE_URL/api/todos/<todoId>" \
+  -H "Authorization: Bearer $IBX_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"done"}'
+
+# delete a todo
+curl -sS -X DELETE "$IBX_BASE_URL/api/todos/<todoId>" \
+  -H "Authorization: Bearer $IBX_API_KEY" \
+  -H "Content-Type: application/json"
+```
+
 ## CLI (`ibx`)
 
 The CLI is TypeScript-based and uses `flags`.
