@@ -175,7 +175,7 @@ export function TodosPanel({
                       <label
                         htmlFor={`todo-${todo.id}`}
                         className={cn(
-                          "text-sm leading-relaxed",
+                          "text-sm leading-relaxed lowercase",
                           todo.status === "done"
                             ? "text-muted-foreground line-through"
                             : "text-foreground",
@@ -192,7 +192,7 @@ export function TodosPanel({
                           <summary className="cursor-pointer select-none">
                             notes
                           </summary>
-                          <p className="mt-1 whitespace-pre-wrap">
+                          <p className="mt-1 whitespace-pre-wrap lowercase">
                             {todo.notes}
                           </p>
                         </details>

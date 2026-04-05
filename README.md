@@ -247,7 +247,7 @@ Available commands:
 - `ibx todos done --id <todoId|prefix>`
 - `ibx todos open --id <todoId|prefix>`
 - `ibx todos delete --id <todoId|prefix>`
-- `ibx todos set --id <todoId|prefix> [--due YYYY-MM-DD] [--priority 1|2|3] [--recurrence none|daily|weekly|monthly]`
+- `ibx todos set --id <todoId|prefix> [--title "new title"] [--due YYYY-MM-DD] [--priority 1|2|3] [--recurrence none|daily|weekly|monthly]`
 
 Build CLI artifacts:
 

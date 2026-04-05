@@ -490,7 +490,7 @@ function printHelp() {
   print("  ibx todos open --id <todoId|prefix>");
   print("  ibx todos delete --id <todoId|prefix>");
   print(
-    "  ibx todos set --id <todoId|prefix> [--due YYYY-MM-DD] [--priority 1|2|3] [--recurrence none|daily|weekly|monthly]",
+    "  ibx todos set --id <todoId|prefix> [--title \"new title\"] [--due YYYY-MM-DD] [--priority 1|2|3] [--recurrence none|daily|weekly|monthly]",
   );
 }
 
@@ -772,10 +772,18 @@ async function runTodosCommand(parsed: ParsedArgs) {
       throw new Error("--priority must be one of: 1, 2, 3.");
     }
 
+    const titleInput = getStringOption(parsed, "title");
+    const title =
+      titleInput !== null ? titleInput.trim().slice(0, 140) : null;
+    if (titleInput !== null && !title) {
+      throw new Error("--title cannot be empty.");
+    }
+
     const payload: {
       dueDate?: string | null;
       recurrence?: TodoRecurrence;
       priority?: TodoPriority;
+      title?: string;
     } = {};
 
     if (due !== null) {
@@ -790,9 +798,13 @@ async function runTodosCommand(parsed: ParsedArgs) {
       payload.priority = priority;
     }
 
+    if (title !== null) {
+      payload.title = title;
+    }
+
     if (Object.keys(payload).length === 0) {
       throw new Error(
-        "Nothing to update. Set at least one of --due, --recurrence, --priority.",
+        "Nothing to update. Set at least one of --title, --due, --recurrence, --priority.",
       );
     }
 

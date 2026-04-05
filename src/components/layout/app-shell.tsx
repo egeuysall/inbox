@@ -1528,7 +1528,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
                               <div className="flex items-start justify-between gap-2">
                                 <p
                                   className={cn(
-                                    "text-sm",
+                                    "text-sm lowercase",
                                     todo.status === "done" &&
                                       "line-through opacity-70",
                                   )}
@@ -1538,7 +1538,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
                               </div>
                               {todo.notes ? (
                                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                  <p className="max-w-full break-words">
+                                  <p className="max-w-full break-words lowercase">
                                     {expandedNoteIds[todo.id]
                                       ? todo.notes
                                       : getPreviewNotes(todo.notes)}
@@ -1588,31 +1588,23 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
                                   if (event.key === "Enter") {
                                     event.preventDefault();
                                     void updateTodoTitle(todo);
+                                    event.currentTarget.blur();
                                   }
 
                                   if (event.key === "Escape") {
                                     event.preventDefault();
                                     setEditingTitleInput(todo.title);
+                                    event.currentTarget.blur();
                                   }
                                 }}
-                                className="h-8 w-full sm:w-72"
+                                onBlur={() => {
+                                  void updateTodoTitle(todo);
+                                }}
+                                className="h-8 w-full lowercase sm:w-72"
                                 disabled={pendingTodoId === todo.id}
                                 maxLength={140}
                                 aria-label="Edit todo title"
                               />
-                              <Button
-                                type="button"
-                                size="sm"
-                                disabled={pendingTodoId === todo.id}
-                                onClick={() => {
-                                  void updateTodoTitle(todo);
-                                }}
-                                onPointerDown={(event) =>
-                                  event.stopPropagation()
-                                }
-                              >
-                                save title
-                              </Button>
                               <Popover>
                                 <PopoverTrigger
                                   render={
