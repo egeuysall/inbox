@@ -77,8 +77,38 @@ function printWarn(message: string) {
   print(`${color.yellow("warn")} ${message}`);
 }
 
+function colorizeJson(json: string) {
+  if (!useColor) {
+    return json;
+  }
+
+  return json.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g,
+    (token) => {
+      if (token.startsWith('"')) {
+        if (token.endsWith(":")) {
+          return color.cyan(token);
+        }
+
+        return color.green(token);
+      }
+
+      if (token === "true" || token === "false") {
+        return color.yellow(token);
+      }
+
+      if (token === "null") {
+        return color.gray(token);
+      }
+
+      return color.magenta(token);
+    },
+  );
+}
+
 function printJson(value: unknown) {
-  print(safeJsonStringify(value, null, 2));
+  const json = safeJsonStringify(value, null, 2);
+  print(colorizeJson(json));
 }
 
 function normalizeBaseUrl(input: string) {
@@ -419,6 +449,74 @@ function parseView(value: string | null): ViewMode {
   return "today";
 }
 
+function normalizeAuthSubcommand(value: string | null) {
+  if (!value) {
+    return "status";
+  }
+
+  if (value === "login" || value === "l" || value === "in") {
+    return "login";
+  }
+
+  if (value === "logout" || value === "out" || value === "o") {
+    return "logout";
+  }
+
+  if (value === "status" || value === "s" || value === "st") {
+    return "status";
+  }
+
+  return value;
+}
+
+function normalizeTodosSubcommand(value: string | null) {
+  if (!value) {
+    return "list";
+  }
+
+  if (value === "list" || value === "ls" || value === "l") {
+    return "list";
+  }
+
+  if (value === "done" || value === "x") {
+    return "done";
+  }
+
+  if (value === "open" || value === "o") {
+    return "open";
+  }
+
+  if (
+    value === "delete" ||
+    value === "remove" ||
+    value === "del" ||
+    value === "rm" ||
+    value === "d"
+  ) {
+    return "delete";
+  }
+
+  if (value === "set" || value === "s") {
+    return "set";
+  }
+
+  if (value === "run" || value === "r") {
+    return "run";
+  }
+
+  if (
+    value === "today-done" ||
+    value === "completed-today" ||
+    value === "td" ||
+    value === "ct" ||
+    value === "c"
+  ) {
+    return "today-done";
+  }
+
+  return value;
+}
+
 async function readFromStdin() {
   if (process.stdin.isTTY) {
     return null;
@@ -482,20 +580,32 @@ function printHelp() {
   print(
     "  ibx auth login [--api-key iak_...] [--url https://ibx.egeuysal.com]",
   );
+  print("  ibx a l [--api-key iak_...] [--url https://ibx.egeuysal.com]");
   print("  ibx auth status");
+  print("  ibx a s");
   print("  ibx auth logout");
+  print("  ibx a o");
   print('  ibx add [--input "..."]');
+  print('  ibx n [--input "..."]');
   print("  ibx todos list [--view today|upcoming|archive|all] [--json]");
+  print("  ibx t l [--view today|upcoming|archive|all] [--json]");
+  print("  ibx td   # today's completed tasks");
   print("  ibx todos done --id <todoId|prefix>");
+  print("  ibx t x --id <todoId|prefix>");
   print("  ibx todos open --id <todoId|prefix>");
+  print("  ibx t o --id <todoId|prefix>");
   print("  ibx todos delete --id <todoId|prefix>");
+  print("  ibx t d --id <todoId|prefix>");
   print(
     "  ibx todos set --id <todoId|prefix> [--title \"new title\"] [--due YYYY-MM-DD] [--priority 1|2|3] [--recurrence none|daily|weekly|monthly]",
+  );
+  print(
+    "  ibx t s --id <todoId|prefix> [--title \"new title\"] [--due YYYY-MM-DD] [--priority 1|2|3] [--recurrence none|daily|weekly|monthly]",
   );
 }
 
 async function runAuthCommand(parsed: ParsedArgs) {
-  const subcommand = parsed.positionals[1] ?? "status";
+  const subcommand = normalizeAuthSubcommand(parsed.positionals[1] ?? "status");
   const outputJson = hasFlag(parsed, "json");
 
   if (subcommand === "login") {
@@ -673,7 +783,7 @@ async function resolveTodoId(
 }
 
 async function runTodosCommand(parsed: ParsedArgs) {
-  const subcommand = parsed.positionals[1] ?? "list";
+  const subcommand = normalizeTodosSubcommand(parsed.positionals[1] ?? "list");
   const outputJson = hasFlag(parsed, "json");
   const config = await requireConfig();
 
@@ -696,6 +806,37 @@ async function runTodosCommand(parsed: ParsedArgs) {
 
     print(`${color.bold(view)} ${color.gray(String(filtered.length))}`);
     printTodoList(filtered, view);
+    return;
+  }
+
+  if (subcommand === "today-done") {
+    const todayStartUtc = getStartOfUtcDay(Date.now());
+    const dayMs = 24 * 60 * 60 * 1000;
+    const response = await requestJson<{ todos: TodoItem[] }>(
+      config,
+      "/api/todos",
+      {
+        method: "GET",
+      },
+    );
+
+    const filtered = sortTodos(
+      response.todos.filter(
+        (todo) =>
+          todo.status === "done" &&
+          todo.dueDate !== null &&
+          todo.dueDate >= todayStartUtc &&
+          todo.dueDate < todayStartUtc + dayMs,
+      ),
+    );
+
+    if (outputJson) {
+      printJson({ view: "today-done", todos: filtered });
+      return;
+    }
+
+    print(`${color.bold("today-done")} ${color.gray(String(filtered.length))}`);
+    printTodoList(filtered, "archive");
     return;
   }
 
@@ -828,42 +969,64 @@ async function runTodosCommand(parsed: ParsedArgs) {
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   const first = parsed.positionals[0];
+  const normalizedFirst =
+    first === "a"
+      ? "auth"
+      : first === "n"
+        ? "add"
+        : first === "t"
+          ? "todos"
+          : first === "td"
+            ? "todos"
+            : first;
+  const normalizedParsed: ParsedArgs =
+    first === "td"
+      ? {
+          ...parsed,
+          positionals: ["todos", "today-done", ...parsed.positionals.slice(1)],
+        }
+      : first === "a" || first === "n" || first === "t"
+        ? {
+            ...parsed,
+            positionals: [normalizedFirst as string, ...parsed.positionals.slice(1)],
+          }
+        : parsed;
 
-  if (hasFlag(parsed, "help") || first === "help") {
+  if (hasFlag(parsed, "help") || normalizedFirst === "help") {
     printHelp();
     return;
   }
 
-  if (hasFlag(parsed, "version") || first === "version") {
+  if (hasFlag(parsed, "version") || normalizedFirst === "version") {
     print(VERSION);
     return;
   }
 
-  if (!first) {
+  if (!normalizedFirst) {
     print(`${color.bold("ibx")} ${color.gray("quick capture")}`);
     await runAddCommand({
-      ...parsed,
+      ...normalizedParsed,
       positionals: ["add"],
     });
     return;
   }
 
-  if (first === "auth") {
-    await runAuthCommand(parsed);
+  if (normalizedFirst === "auth") {
+    await runAuthCommand(normalizedParsed);
     return;
   }
 
-  if (first === "add") {
-    await runAddCommand(parsed);
+  if (normalizedFirst === "add") {
+    await runAddCommand(normalizedParsed);
     return;
   }
 
-  if (first === "todos") {
-    await runTodosCommand(parsed);
+  if (normalizedFirst === "todos") {
+    await runTodosCommand(normalizedParsed);
     return;
   }
 
-  throw new Error(`Unknown command: ${first}`);
+  throw new Error(`Unknown command: ${normalizedFirst}`);
 }
 
 void main().catch((error) => {

@@ -32,7 +32,8 @@ const FILTER_STORAGE_KEY = "ibx:active-view";
 const PROMPT_AUTOFOCUS_STORAGE_KEY = "ibx:prompt-autofocus";
 const PICKER_ITEM_CLASS =
   "border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background";
-const CLI_INSTALL_COMMAND = "curl -fsSL https://ibx.egeuysal.com/install.sh | bash";
+const CLI_INSTALL_COMMAND =
+  "curl -fsSL https://ibx.egeuysal.com/install.sh | bash";
 const SHORTCUT_INSTALL_URL =
   "https://ibx.egeuysal.com/shortcuts/ibx-capture.shortcut";
 const LOCAL_STATUS_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -100,14 +101,22 @@ export function SettingsView() {
 
   const setThemeFromGroup = (values: string[]) => {
     const nextTheme = values[0];
-    if (nextTheme === "light" || nextTheme === "dark" || nextTheme === "system") {
+    if (
+      nextTheme === "light" ||
+      nextTheme === "dark" ||
+      nextTheme === "system"
+    ) {
       setTheme(nextTheme as ThemePreference);
     }
   };
 
   const setDefaultViewFromGroup = (values: string[]) => {
     const nextView = values[0];
-    if (nextView !== "today" && nextView !== "upcoming" && nextView !== "archive") {
+    if (
+      nextView !== "today" &&
+      nextView !== "upcoming" &&
+      nextView !== "archive"
+    ) {
       return;
     }
 
@@ -129,7 +138,10 @@ export function SettingsView() {
     const nextAutofocus = nextValue === "on";
     setPromptAutofocus(nextAutofocus);
     try {
-      window.localStorage.setItem(PROMPT_AUTOFOCUS_STORAGE_KEY, nextAutofocus ? "1" : "0");
+      window.localStorage.setItem(
+        PROMPT_AUTOFOCUS_STORAGE_KEY,
+        nextAutofocus ? "1" : "0",
+      );
     } catch {
       // Ignore localStorage failures (private mode, blocked storage)
     }
@@ -160,7 +172,8 @@ export function SettingsView() {
       const { keys } = await apiClient.listApiKeys();
       setApiKeys(keys);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load API keys.";
+      const message =
+        error instanceof Error ? error.message : "Failed to load API keys.";
       toast.error(message);
     } finally {
       setIsLoadingKeys(false);
@@ -194,7 +207,8 @@ export function SettingsView() {
         toast.message("API key created");
         await refreshApiKeys();
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to create API key.";
+        const message =
+          error instanceof Error ? error.message : "Failed to create API key.";
         toast.error(message);
       }
     });
@@ -207,7 +221,8 @@ export function SettingsView() {
       toast.message("API key revoked");
       await refreshApiKeys();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to revoke API key.";
+      const message =
+        error instanceof Error ? error.message : "Failed to revoke API key.";
       toast.error(message);
     } finally {
       setRevokingKeyId(null);
@@ -258,8 +273,12 @@ export function SettingsView() {
                     render={<Link href="/?view=today" prefetch={false} />}
                     className="group-data-[collapsible=icon]:justify-center"
                   >
-                    <span className="group-data-[collapsible=icon]:hidden">today</span>
-                    <span className="hidden group-data-[collapsible=icon]:inline">{"\\"}</span>
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      today
+                    </span>
+                    <span className="hidden group-data-[collapsible=icon]:inline">
+                      {"\\"}
+                    </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -267,8 +286,12 @@ export function SettingsView() {
                     render={<Link href="/?view=upcoming" prefetch={false} />}
                     className="group-data-[collapsible=icon]:justify-center"
                   >
-                    <span className="group-data-[collapsible=icon]:hidden">upcoming</span>
-                    <span className="hidden group-data-[collapsible=icon]:inline">/</span>
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      upcoming
+                    </span>
+                    <span className="hidden group-data-[collapsible=icon]:inline">
+                      /
+                    </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -276,8 +299,12 @@ export function SettingsView() {
                     render={<Link href="/?view=archive" prefetch={false} />}
                     className="group-data-[collapsible=icon]:justify-center"
                   >
-                    <span className="group-data-[collapsible=icon]:hidden">archive</span>
-                    <span className="hidden group-data-[collapsible=icon]:inline">[</span>
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      archive
+                    </span>
+                    <span className="hidden group-data-[collapsible=icon]:inline">
+                      [
+                    </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -286,8 +313,12 @@ export function SettingsView() {
                     render={<Link href="/settings" prefetch={false} />}
                     className="group-data-[collapsible=icon]:justify-center"
                   >
-                    <span className="group-data-[collapsible=icon]:hidden">settings</span>
-                    <span className="hidden group-data-[collapsible=icon]:inline">]</span>
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      settings
+                    </span>
+                    <span className="hidden group-data-[collapsible=icon]:inline">
+                      ]
+                    </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -304,7 +335,11 @@ export function SettingsView() {
         <SidebarInset className="min-h-dvh flex flex-col">
           <header className="sticky top-0 z-20 flex h-12 items-center border-b bg-background px-4 md:px-6">
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="md:hidden" size="icon-sm" variant="ghost" />
+              <SidebarTrigger
+                className="md:hidden"
+                size="icon-sm"
+                variant="ghost"
+              />
               <p className="text-sm text-muted-foreground">{"> settings"}</p>
             </div>
           </header>
@@ -352,20 +387,31 @@ export function SettingsView() {
                     size="sm"
                     disabled={!hasHydratedPreferences}
                   >
-                    <ToggleGroupItem value="today" className={PICKER_ITEM_CLASS}>
+                    <ToggleGroupItem
+                      value="today"
+                      className={PICKER_ITEM_CLASS}
+                    >
                       today
                     </ToggleGroupItem>
-                    <ToggleGroupItem value="upcoming" className={PICKER_ITEM_CLASS}>
+                    <ToggleGroupItem
+                      value="upcoming"
+                      className={PICKER_ITEM_CLASS}
+                    >
                       upcoming
                     </ToggleGroupItem>
-                    <ToggleGroupItem value="archive" className={PICKER_ITEM_CLASS}>
+                    <ToggleGroupItem
+                      value="archive"
+                      className={PICKER_ITEM_CLASS}
+                    >
                       archive
                     </ToggleGroupItem>
                   </ToggleGroup>
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <p className="text-xs text-muted-foreground">prompt autofocus</p>
+                  <p className="text-xs text-muted-foreground">
+                    prompt autofocus
+                  </p>
                   <ToggleGroup
                     multiple={false}
                     value={[promptAutofocus ? "on" : "off"]}
@@ -388,14 +434,17 @@ export function SettingsView() {
             <section className="border-b px-4 py-4 md:px-6">
               <p className="text-sm">api keys</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                create keys for cli usage. keys are shown once and only hashed values are stored.
+                create keys for cli usage. keys are shown once and only hashed
+                values are stored.
               </p>
 
               <div className="mt-3 flex max-w-xl flex-wrap items-center gap-1.5">
                 <input
                   value={keyName}
-                  onChange={(event) => setKeyName(event.target.value.slice(0, 64))}
-                  className="h-8 w-44 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring"
+                  onChange={(event) =>
+                    setKeyName(event.target.value.slice(0, 64))
+                  }
+                  className="h-7 w-44 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring"
                   placeholder="key name"
                 />
                 <Button
@@ -411,10 +460,17 @@ export function SettingsView() {
 
               {createdApiKey ? (
                 <div className="mt-3 flex max-w-xl flex-col gap-2 rounded-md border border-input p-2">
-                  <p className="text-[11px] text-muted-foreground">copy now. this value will not be shown again.</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    copy now. this value will not be shown again.
+                  </p>
                   <code className="break-all text-xs">{createdApiKey}</code>
                   <div className="flex gap-1.5">
-                    <Button variant="outline" size="sm" className="w-auto" onClick={copyCreatedApiKey}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-auto"
+                      onClick={copyCreatedApiKey}
+                    >
                       copy
                     </Button>
                     <Button
@@ -431,7 +487,9 @@ export function SettingsView() {
 
               <div className="mt-3 flex max-w-xl flex-col gap-1.5">
                 {isLoadingKeys ? (
-                  <p className="text-xs text-muted-foreground">loading keys...</p>
+                  <p className="text-xs text-muted-foreground">
+                    loading keys...
+                  </p>
                 ) : apiKeys.length === 0 ? (
                   <p className="text-xs text-muted-foreground">no keys yet</p>
                 ) : (
@@ -442,7 +500,9 @@ export function SettingsView() {
                     >
                       <div className="min-w-0">
                         <p>{key.name}</p>
-                        <p className="text-muted-foreground">{key.prefix}_...{key.last4}</p>
+                        <p className="text-muted-foreground">
+                          {key.prefix}_...{key.last4}
+                        </p>
                       </div>
                       <Button
                         variant="outline"
@@ -467,15 +527,22 @@ export function SettingsView() {
 
               <div className="mt-3 flex max-w-xl flex-col gap-3">
                 <div className="rounded-md border border-input p-2">
-                  <p className="text-xs text-muted-foreground">cli install command</p>
-                  <code className="mt-1 block break-all text-xs">{CLI_INSTALL_COMMAND}</code>
+                  <p className="text-xs text-muted-foreground">
+                    cli install command
+                  </p>
+                  <code className="mt-1 block break-all text-xs">
+                    {CLI_INSTALL_COMMAND}
+                  </code>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <Button
                       variant="outline"
                       size="sm"
                       className="w-auto"
                       onClick={() =>
-                        void copyToClipboard(CLI_INSTALL_COMMAND, "CLI install command copied")
+                        void copyToClipboard(
+                          CLI_INSTALL_COMMAND,
+                          "CLI install command copied",
+                        )
                       }
                     >
                       copy command
@@ -484,14 +551,24 @@ export function SettingsView() {
                 </div>
 
                 <div className="rounded-md border border-input p-2">
-                  <p className="text-xs text-muted-foreground">apple shortcut install link</p>
-                  <code className="mt-1 block break-all text-xs">{SHORTCUT_INSTALL_URL}</code>
+                  <p className="text-xs text-muted-foreground">
+                    apple shortcut install link
+                  </p>
+                  <code className="mt-1 block break-all text-xs">
+                    {SHORTCUT_INSTALL_URL}
+                  </code>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <Button
                       variant="outline"
                       size="sm"
                       className="w-auto"
-                      onClick={() => window.open(SHORTCUT_INSTALL_URL, "_blank", "noopener,noreferrer")}
+                      onClick={() =>
+                        window.open(
+                          SHORTCUT_INSTALL_URL,
+                          "_blank",
+                          "noopener,noreferrer",
+                        )
+                      }
                     >
                       open link
                     </Button>
