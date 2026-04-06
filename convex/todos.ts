@@ -10,20 +10,42 @@ const recurrenceValidator = v.union(
 );
 const priorityValidator = v.union(v.literal(1), v.literal(2), v.literal(3));
 const DAY_MS = 24 * 60 * 60 * 1000;
+const USER_TIMEZONE = "America/Chicago";
+const USER_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: USER_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
-function getStartOfUtcDay(timestamp: number) {
-  const date = new Date(timestamp);
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+function getUserDateKey(timestamp: number) {
+  const parts = USER_DAY_FORMATTER.formatToParts(new Date(timestamp));
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    const date = new Date(timestamp);
+    const fallbackYear = date.getUTCFullYear();
+    const fallbackMonth = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const fallbackDay = String(date.getUTCDate()).padStart(2, "0");
+    return `${fallbackYear}-${fallbackMonth}-${fallbackDay}`;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function getStartOfConfiguredDay(timestamp: number) {
+  return Date.parse(`${getUserDateKey(timestamp)}T00:00:00.000Z`);
 }
 
 function getNextRecurringDueDate(
   recurrence: "daily" | "weekly" | "monthly",
-  dueDate: number | null | undefined,
+  _dueDate: number | null | undefined,
   now: number,
 ) {
-  const todayStartUtc = getStartOfUtcDay(now);
-  const baseDueDate =
-    typeof dueDate === "number" ? Math.max(dueDate, todayStartUtc) : todayStartUtc;
+  const todayStartUtc = getStartOfConfiguredDay(now);
+  const baseDueDate = todayStartUtc;
 
   if (recurrence === "daily") {
     return baseDueDate + DAY_MS;
@@ -109,7 +131,7 @@ export const createMany = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    const todayStartUtc = getStartOfUtcDay(now);
+    const todayStartUtc = getStartOfConfiguredDay(now);
     const insertedIds = [];
 
     for (const item of args.items) {
@@ -144,7 +166,7 @@ export const createOne = mutation({
     source: v.union(v.literal("ai"), v.literal("manual")),
   },
   handler: async (ctx, args) => {
-    const todayStartUtc = getStartOfUtcDay(Date.now());
+    const todayStartUtc = getStartOfConfiguredDay(Date.now());
     return await ctx.db.insert("todos", {
       thoughtId: args.thoughtId,
       thoughtExternalId: args.thoughtExternalId,
@@ -256,7 +278,7 @@ export const updateSchedule = mutation({
       priority?: 1 | 2 | 3;
     } = {};
 
-    const todayStartUtc = getStartOfUtcDay(Date.now());
+    const todayStartUtc = getStartOfConfiguredDay(Date.now());
 
     if (args.dueDate !== undefined) {
       patch.dueDate = args.dueDate ?? todayStartUtc;
@@ -268,6 +290,58 @@ export const updateSchedule = mutation({
 
     if (args.priority !== undefined) {
       patch.priority = args.priority;
+    }
+
+    await ctx.db.patch(args.todoId, patch);
+    return args.todoId;
+  },
+});
+
+export const updateFromAgent = mutation({
+  args: {
+    todoId: v.id("todos"),
+    title: v.optional(v.string()),
+    notes: v.optional(v.union(v.string(), v.null())),
+    dueDate: v.optional(v.union(v.number(), v.null())),
+    recurrence: v.optional(recurrenceValidator),
+    priority: v.optional(priorityValidator),
+  },
+  handler: async (ctx, args) => {
+    const existingTodo = await ctx.db.get(args.todoId);
+    if (!existingTodo) {
+      return null;
+    }
+
+    const patch: {
+      title?: string;
+      notes?: string | null;
+      dueDate?: number | null;
+      recurrence?: "none" | "daily" | "weekly" | "monthly";
+      priority?: 1 | 2 | 3;
+    } = {};
+
+    if (args.title !== undefined) {
+      patch.title = args.title;
+    }
+
+    if (args.notes !== undefined) {
+      patch.notes = args.notes;
+    }
+
+    if (args.dueDate !== undefined) {
+      patch.dueDate = args.dueDate ?? getStartOfConfiguredDay(Date.now());
+    }
+
+    if (args.recurrence !== undefined) {
+      patch.recurrence = args.recurrence;
+    }
+
+    if (args.priority !== undefined) {
+      patch.priority = args.priority;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return args.todoId;
     }
 
     await ctx.db.patch(args.todoId, patch);

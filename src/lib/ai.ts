@@ -14,6 +14,30 @@ const AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const VALID_RECURRENCE = new Set(["none", "daily", "weekly", "monthly"]);
 const MAX_NOTES_LENGTH = 160;
 const MAX_GENERATED_TODOS = 30;
+const CHECKLIST_ITEM_REGEX = /^\s*(?:[-*]\s+|\d+[.)]\s+)(?:\[[ xX]\]\s*)?/;
+
+function estimateIntentCount(rawText: string) {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const checklistItems = lines.filter((line) => CHECKLIST_ITEM_REGEX.test(line));
+  if (checklistItems.length > 0) {
+    return Math.min(MAX_GENERATED_TODOS, checklistItems.length);
+  }
+
+  const sentenceCandidates = rawText
+    .split(/\n+|[.;]+|\b(?:and|then|also)\b/gi)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (sentenceCandidates.length === 0) {
+    return 1;
+  }
+
+  return Math.min(12, sentenceCandidates.length);
+}
 
 function clampText(text: string, maxLength: number) {
   return text.trim().slice(0, maxLength);
@@ -37,7 +61,26 @@ function normalizeDueDate(value: unknown) {
   return candidate;
 }
 
-function normalizeTodos(value: unknown): AiTodo[] {
+function normalizeNotesDescription(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value
+    .replace(/\bcontext:\s*/gi, "")
+    .replace(/\bnext:\s*/gi, "")
+    .replace(/\s*;\s*/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  return clampText(normalized, MAX_NOTES_LENGTH);
+}
+
+function normalizeTodos(value: unknown, maxTodos: number): AiTodo[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -64,7 +107,7 @@ function normalizeTodos(value: unknown): AiTodo[] {
       continue;
     }
 
-    const notes = typeof notesSource === "string" ? clampText(notesSource, MAX_NOTES_LENGTH) : null;
+    const notes = normalizeNotesDescription(notesSource);
     const dueDate = normalizeDueDate(dueDateSource);
     const recurrence =
       typeof recurrenceSource === "string" && VALID_RECURRENCE.has(recurrenceSource)
@@ -77,7 +120,7 @@ function normalizeTodos(value: unknown): AiTodo[] {
 
     items.push({ title, notes: notes || null, dueDate, recurrence, priority });
 
-    if (items.length >= MAX_GENERATED_TODOS) {
+    if (items.length >= maxTodos) {
       break;
     }
   }
@@ -127,6 +170,11 @@ export async function generateTodosFromThought(rawText: string, options: Generat
   const memoryBlock = options.recentRunMemories.length
     ? options.recentRunMemories.map((memory, index) => `${index + 1}. ${memory}`).join("\n")
     : "No past run memory available yet.";
+  const estimatedIntentCount = estimateIntentCount(rawText);
+  const maxTodosForPrompt = Math.max(
+    1,
+    Math.min(MAX_GENERATED_TODOS, estimatedIntentCount * 2),
+  );
 
   const response = await fetch(AI_GATEWAY_URL, {
     method: "POST",
@@ -147,16 +195,18 @@ Each object must be:
 
 Rules:
 - Keep titles short and actionable.
-- Keep notes concise (max ${MAX_NOTES_LENGTH} chars) and include concrete context + next action.
-- Prefer notes like: "context: lead=Acme CTO, repo=ibx-web; next: send follow-up draft."
+- Keep notes concise (max ${MAX_NOTES_LENGTH} chars) as plain readable description text.
+- Never use labels like "context:" or "next:" in notes.
 - Never output long writing instructions or multi-step paragraphs in notes.
+- Create one todo per concrete intent. Do not split one intent into meta subtasks.
+- Do not add planning/setup tasks like "plan how to..." unless explicitly requested.
 - Use recurrence only when the thought clearly implies repeated cadence.
-- Today's UTC date is ${options.todayDateKey}.
+- Today's date in the user's timezone is ${options.todayDateKey}.
 - Default dueDate to ${options.todayDateKey}.
 - Only use a different dueDate when the prompt explicitly states another time/date (e.g. tomorrow, this weekend, next week, on Friday, specific date).
 - If the prompt uses relative timing, convert it to a concrete YYYY-MM-DD date.
 - Set priority: 1=must-do today, 2=important, 3=nice-to-have.
-- Keep at most ${MAX_GENERATED_TODOS} todos.
+- Keep at most ${maxTodosForPrompt} todos for this input.
 - If no actionable todos exist, return [].
 
 About Ege:
@@ -193,12 +243,12 @@ ${memoryBlock}`,
   }
 
   if (Array.isArray(parsed)) {
-    return normalizeTodos(parsed);
+    return normalizeTodos(parsed, maxTodosForPrompt);
   }
 
   if (typeof parsed === "object" && parsed) {
     const nested = Reflect.get(parsed, "todos");
-    return normalizeTodos(nested);
+    return normalizeTodos(nested, maxTodosForPrompt);
   }
 
   return [];

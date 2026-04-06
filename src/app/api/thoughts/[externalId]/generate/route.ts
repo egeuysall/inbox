@@ -11,9 +11,16 @@ import {
 import { getEgeContext } from "@/lib/ege-context";
 import { generateTodosFromThought } from "@/lib/ai";
 import { api, convex } from "@/lib/convex-server";
-import { planGeneratedTodos } from "@/lib/todo-planning";
+import { planTodoReconciliation } from "@/lib/todo-planning";
 
 const DATE_KEY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const USER_TIMEZONE = "America/Chicago";
+const USER_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: USER_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 function getExternalId(params: { externalId: string }) {
   const externalId = params.externalId?.trim();
@@ -27,6 +34,23 @@ function getExternalId(params: { externalId: string }) {
 function getStartOfUtcDay(timestamp: number) {
   const date = new Date(timestamp);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function getUserDateKey(timestamp: number) {
+  const parts = USER_DAY_FORMATTER.formatToParts(new Date(timestamp));
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    return toDateKey(getStartOfUtcDay(timestamp));
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function getStartOfUserDay(timestamp: number) {
+  return Date.parse(`${getUserDateKey(timestamp)}T00:00:00.000Z`);
 }
 
 function toDateKey(utcStart: number) {
@@ -73,7 +97,7 @@ export async function POST(
 
   const body = (await request.json().catch(() => null)) as { today?: unknown } | null;
   const todayStartUtc = parseTodayStartUtc(body?.today);
-  const effectiveTodayStartUtc = todayStartUtc ?? getStartOfUtcDay(Date.now());
+  const effectiveTodayStartUtc = todayStartUtc ?? getStartOfUserDay(Date.now());
   const todayDateKey = toDateKey(effectiveTodayStartUtc);
 
   const thought = await convex.query(api.thoughts.getByExternalId, { externalId });
@@ -112,13 +136,49 @@ export async function POST(
       });
     }
     const existingTodos = await convex.query(api.todos.listAll, {});
-    const plannedTodos = planGeneratedTodos(generatedTodos, existingTodos, effectiveTodayStartUtc);
+    const reconciliationPlan = planTodoReconciliation(
+      generatedTodos,
+      existingTodos.map((todo) => ({
+        id: String(todo._id),
+        title: todo.title,
+        notes: todo.notes ?? null,
+        status: todo.status,
+        dueDate: todo.dueDate ?? null,
+        priority: todo.priority ?? 2,
+        recurrence: todo.recurrence ?? "none",
+        createdAt: todo.createdAt,
+      })),
+      effectiveTodayStartUtc,
+    );
 
-    if (plannedTodos.length > 0) {
+    if (reconciliationPlan.deleteIds.length > 0) {
+      await Promise.all(
+        reconciliationPlan.deleteIds.map((todoId) =>
+          convex.mutation(api.todos.deleteOneByStringId, { todoId }),
+        ),
+      );
+    }
+
+    if (reconciliationPlan.update.length > 0) {
+      await Promise.all(
+        reconciliationPlan.update.map((todo) =>
+          convex.mutation(api.todos.updateFromAgent, {
+            todoId: todo.id as never,
+            title: todo.title,
+            notes: todo.notes,
+            dueDate: todo.dueDateTimestamp,
+            recurrence: todo.recurrence,
+            priority: todo.priority,
+          }),
+        ),
+      );
+    }
+
+    if (reconciliationPlan.create.length > 0) {
       await convex.mutation(api.todos.createMany, {
         thoughtId: thought._id,
         thoughtExternalId: externalId,
-        items: plannedTodos.map((todo) => ({
+        items: reconciliationPlan.create.map((todo) => ({
           title: todo.title,
           notes: todo.notes,
           dueDate: todo.dueDateTimestamp,
@@ -138,13 +198,13 @@ export async function POST(
 
     await convex.mutation(api.memories.addRunMemory, {
       runExternalId: externalId,
-      content: `input="${thought.rawText.slice(0, 240)}" created=${plannedTodos.length} todos titles=[${plannedTodos
+      content: `input="${thought.rawText.slice(0, 240)}" created=${reconciliationPlan.create.length} updated=${reconciliationPlan.update.length} deleted=${reconciliationPlan.deleteIds.length} todos titles=[${reconciliationPlan.create
         .map((todo) => todo.title)
         .slice(0, 6)
         .join(" | ")}]`,
     });
 
-    return NextResponse.json({ ok: true, created: plannedTodos.length });
+    return NextResponse.json({ ok: true, created: reconciliationPlan.create.length });
   } catch (error) {
     await convex.mutation(api.thoughts.updateStatus, {
       externalId,
