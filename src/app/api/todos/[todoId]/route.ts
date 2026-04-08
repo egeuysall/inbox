@@ -9,6 +9,8 @@ import {
 import { api, convex } from "@/lib/convex-server";
 import type { TodoStatus } from "@/lib/types";
 
+const MAX_NOTES_LENGTH = 640;
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ todoId: string }> },
@@ -36,22 +38,34 @@ export async function PATCH(
   const body = (await request.json().catch(() => null)) as {
     status?: unknown;
     dueDate?: unknown;
+    estimatedHours?: unknown;
+    timeBlockStart?: unknown;
     recurrence?: unknown;
     priority?: unknown;
     title?: unknown;
+    notes?: unknown;
   } | null;
 
   const status = body?.status;
   const dueDate = body?.dueDate;
+  const estimatedHours = body?.estimatedHours;
+  const timeBlockStart = body?.timeBlockStart;
   const recurrence = body?.recurrence;
   const priority = body?.priority;
   const title = body?.title;
+  const notes = body?.notes;
 
   const hasStatus = status === "open" || status === "done";
-  const hasSchedule = dueDate !== undefined || recurrence !== undefined || priority !== undefined;
+  const hasSchedule =
+    dueDate !== undefined ||
+    estimatedHours !== undefined ||
+    timeBlockStart !== undefined ||
+    recurrence !== undefined ||
+    priority !== undefined;
   const hasTitle = title !== undefined;
+  const hasNotes = notes !== undefined;
 
-  if (!hasStatus && !hasSchedule && !hasTitle) {
+  if (!hasStatus && !hasSchedule && !hasTitle && !hasNotes) {
     return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
   }
 
@@ -91,14 +105,53 @@ export async function PATCH(
         : typeof dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)
           ? Date.parse(`${dueDate}T00:00:00.000Z`)
           : null;
+    const normalizedEstimatedHours =
+      estimatedHours === null || estimatedHours === undefined
+        ? null
+        : typeof estimatedHours === "number" &&
+            Number.isFinite(estimatedHours) &&
+            estimatedHours >= 0.25 &&
+            estimatedHours <= 24
+          ? Math.round(estimatedHours * 4) / 4
+          : null;
+    const normalizedTimeBlockStart =
+      timeBlockStart === null || timeBlockStart === undefined
+        ? null
+        : typeof timeBlockStart === "number" &&
+            Number.isFinite(timeBlockStart) &&
+            timeBlockStart > 0
+          ? timeBlockStart
+          : null;
 
     if (dueDate !== null && dueDate !== undefined && normalizedDueDate === null) {
       return NextResponse.json({ error: "Invalid due date." }, { status: 400 });
     }
 
+    if (
+      estimatedHours !== null &&
+      estimatedHours !== undefined &&
+      normalizedEstimatedHours === null
+    ) {
+      return NextResponse.json({ error: "Invalid estimated hours." }, { status: 400 });
+    }
+
+    if (
+      timeBlockStart !== null &&
+      timeBlockStart !== undefined &&
+      normalizedTimeBlockStart === null
+    ) {
+      return NextResponse.json({ error: "Invalid time block start." }, { status: 400 });
+    }
+
     await convex.mutation(api.todos.updateSchedule, {
       todoId: todoId as never,
       ...(dueDate !== undefined ? { dueDate: normalizedDueDate } : {}),
+      ...(estimatedHours !== undefined
+        ? { estimatedHours: normalizedEstimatedHours }
+        : {}),
+      ...(timeBlockStart !== undefined
+        ? { timeBlockStart: normalizedTimeBlockStart }
+        : {}),
       ...(recurrence !== undefined
         ? { recurrence: normalizedRecurrence as "none" | "daily" | "weekly" | "monthly" }
         : {}),
@@ -119,6 +172,24 @@ export async function PATCH(
     await convex.mutation(api.todos.updateTitle, {
       todoId: todoId as never,
       title: normalizedTitle,
+    });
+  }
+
+  if (hasNotes) {
+    const normalizedNotes =
+      notes === null
+        ? null
+        : typeof notes === "string"
+          ? notes.trim().slice(0, MAX_NOTES_LENGTH) || null
+          : null;
+
+    if (notes !== null && typeof notes !== "string") {
+      return NextResponse.json({ error: "Invalid notes value." }, { status: 400 });
+    }
+
+    await convex.mutation(api.todos.updateFromAgent, {
+      todoId: todoId as never,
+      notes: normalizedNotes,
     });
   }
 

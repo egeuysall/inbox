@@ -7,6 +7,13 @@ export type TodoRecurrence = "none" | "daily" | "weekly" | "monthly";
 export type TodoSource = "ai" | "manual";
 export type TodoPriority = 1 | 2 | 3;
 
+export type GenerationPreferences = {
+  autoSchedule: boolean;
+  includeRelevantLinks: boolean;
+  requireTaskDescriptions: boolean;
+  availabilityNotes: string | null;
+};
+
 export type TodoItem = {
   id: string;
   thoughtId: string;
@@ -14,6 +21,8 @@ export type TodoItem = {
   notes: string | null;
   status: TodoStatus;
   dueDate: number | null;
+  estimatedHours: number | null;
+  timeBlockStart: number | null;
   priority: TodoPriority;
   recurrence: TodoRecurrence;
   source: TodoSource;

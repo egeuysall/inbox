@@ -20,6 +20,17 @@ const STOPWORDS = new Set([
   "this",
   "that",
 ]);
+const USER_TIMEZONE = "America/Chicago";
+const TZ_PARTS_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: USER_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
 
 export type ExistingTodoForPlanning = {
   id: string;
@@ -27,6 +38,8 @@ export type ExistingTodoForPlanning = {
   notes: string | null;
   status: "open" | "done";
   dueDate?: number | null;
+  estimatedHours?: number | null;
+  timeBlockStart?: number | null;
   priority?: 1 | 2 | 3 | null;
   recurrence?: "none" | "daily" | "weekly" | "monthly" | null;
   createdAt: number;
@@ -35,6 +48,8 @@ export type ExistingTodoForPlanning = {
 export type PlannedTodo = GeneratedTodo & {
   dueDateTimestamp: number;
   notes: string | null;
+  estimatedHours: number;
+  timeBlockStart: number | null;
 };
 
 export type PlannedTodoUpdate = {
@@ -42,6 +57,8 @@ export type PlannedTodoUpdate = {
   title: string;
   notes: string | null;
   dueDateTimestamp: number;
+  estimatedHours: number;
+  timeBlockStart: number | null;
   priority: 1 | 2 | 3;
   recurrence: "none" | "daily" | "weekly" | "monthly";
 };
@@ -50,6 +67,26 @@ export type TodoReconciliationPlan = {
   create: PlannedTodo[];
   update: PlannedTodoUpdate[];
   deleteIds: string[];
+};
+
+type ReconciliationOptions = {
+  autoSchedule?: boolean;
+  requireTaskDescriptions?: boolean;
+};
+
+export type TimeBlockScheduleCandidate = {
+  key: string;
+  existingTodoId?: string;
+  status?: "open" | "done";
+  dueDateTimestamp?: number | null;
+  estimatedHours?: number | null;
+  priority?: 1 | 2 | 3 | null;
+  timeBlockStart?: number | null;
+};
+
+type TimeBlockScheduleOptions = {
+  todayStartUtc?: number;
+  allowOutsideAvailability?: boolean;
 };
 
 function getStartOfUtcDay(timestamp: number) {
@@ -100,6 +137,30 @@ function normalizeRecurrence(
   return "none";
 }
 
+function normalizeEstimatedHours(hours: number | null | undefined) {
+  if (typeof hours !== "number" || !Number.isFinite(hours)) {
+    return null;
+  }
+
+  if (hours < 0.25 || hours > 24) {
+    return null;
+  }
+
+  return Math.round(hours * 4) / 4;
+}
+
+function defaultEstimatedHoursForPriority(priority: 1 | 2 | 3) {
+  if (priority === 1) {
+    return 2;
+  }
+
+  if (priority === 2) {
+    return 1;
+  }
+
+  return 0.5;
+}
+
 function sanitizeNotes(notes: string | null | undefined) {
   if (typeof notes !== "string") {
     return null;
@@ -114,6 +175,190 @@ function sanitizeNotes(notes: string | null | undefined) {
     .slice(0, 160);
 
   return cleaned || null;
+}
+
+function fallbackNotesFromTitle(title: string) {
+  const cleanedTitle = normalizeTitleText(title).replace(/[.!?]+$/g, "");
+  if (!cleanedTitle) {
+    return "Complete this task.";
+  }
+
+  return `Complete ${cleanedTitle}.`;
+}
+
+function ensureNotesDescription(title: string, notes: string | null | undefined) {
+  return sanitizeNotes(notes) ?? fallbackNotesFromTitle(title);
+}
+
+function normalizeNotesForPreference(
+  title: string,
+  notes: string | null | undefined,
+  requireTaskDescriptions: boolean,
+) {
+  if (requireTaskDescriptions) {
+    return ensureNotesDescription(title, notes);
+  }
+
+  return sanitizeNotes(notes);
+}
+
+function getTimezoneOffsetAt(timestamp: number, formatter: Intl.DateTimeFormat) {
+  const parts = formatter.formatToParts(new Date(timestamp));
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  const second = Number(parts.find((part) => part.type === "second")?.value);
+  const asUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  return asUtc - timestamp;
+}
+
+function getDateKeyInTimezone(timestamp: number, formatter: Intl.DateTimeFormat) {
+  const parts = formatter.formatToParts(new Date(timestamp));
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function getHourMinuteInTimezone(timestamp: number, formatter: Intl.DateTimeFormat) {
+  const parts = formatter.formatToParts(new Date(timestamp));
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+    return null;
+  }
+
+  return { hour, minute };
+}
+
+function zonedDateTimeToUtcTimestamp(dateKey: string, minutesSinceStart: number) {
+  const [yearText, monthText, dayText] = dateKey.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(minutesSinceStart)
+  ) {
+    return null;
+  }
+
+  const hours = Math.floor(minutesSinceStart / 60);
+  const minutes = minutesSinceStart % 60;
+  const guess = Date.UTC(year, month - 1, day, hours, minutes, 0);
+  const offset = getTimezoneOffsetAt(guess, TZ_PARTS_FORMATTER);
+  let resolved = Date.UTC(year, month - 1, day, hours, minutes, 0) - offset;
+  const adjustedOffset = getTimezoneOffsetAt(resolved, TZ_PARTS_FORMATTER);
+  if (adjustedOffset !== offset) {
+    resolved = Date.UTC(year, month - 1, day, hours, minutes, 0) - adjustedOffset;
+  }
+
+  return Number.isFinite(resolved) ? resolved : null;
+}
+
+function getAvailabilityWindows(dateKey: string): Array<[number, number]> {
+  const dayOfWeek = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+
+  // Mon-Tue unavailable before 6:00 PM.
+  if (dayOfWeek === 1 || dayOfWeek === 2) {
+    return [[18 * 60, 24 * 60]];
+  }
+
+  // Wed-Fri unavailable before 5:00 PM.
+  if (dayOfWeek >= 3 && dayOfWeek <= 5) {
+    return [[17 * 60, 24 * 60]];
+  }
+
+  // Saturday fully available.
+  if (dayOfWeek === 6) {
+    return [[0, 24 * 60]];
+  }
+
+  // Sunday fully available except 11:00 AM-12:00 PM and 7:00-8:00 PM.
+  return [
+    [0, 11 * 60],
+    [12 * 60, 19 * 60],
+    [20 * 60, 24 * 60],
+  ];
+}
+
+function isIntervalWithinAvailability(
+  dateKey: string,
+  startMinutes: number,
+  durationMinutes: number,
+) {
+  if (startMinutes < 0 || startMinutes + durationMinutes > 24 * 60) {
+    return false;
+  }
+
+  const windows = getAvailabilityWindows(dateKey);
+  return windows.some(
+    ([windowStart, windowEnd]) =>
+      startMinutes >= windowStart &&
+      startMinutes + durationMinutes <= windowEnd,
+  );
+}
+
+function intervalsOverlap(
+  leftStart: number,
+  leftEnd: number,
+  rightStart: number,
+  rightEnd: number,
+) {
+  return leftStart < rightEnd && rightStart < leftEnd;
+}
+
+function suggestTimeBlockStart(
+  dateKey: string,
+  estimatedHours: number,
+  busyByDateKey: Map<string, Array<[number, number]>>,
+) {
+  const durationMinutes = Math.max(15, Math.round(estimatedHours * 60 / 15) * 15);
+  const windows = getAvailabilityWindows(dateKey);
+  const busy = busyByDateKey.get(dateKey) ?? [];
+
+  for (const [windowStart, windowEnd] of windows) {
+    if (windowStart + durationMinutes > windowEnd) {
+      continue;
+    }
+
+    for (
+      let cursor = windowStart;
+      cursor + durationMinutes <= windowEnd;
+      cursor += 15
+    ) {
+      const overlaps = busy.some(([busyStart, busyEnd]) =>
+        intervalsOverlap(cursor, cursor + durationMinutes, busyStart, busyEnd),
+      );
+      if (overlaps) {
+        continue;
+      }
+
+      return cursor;
+    }
+  }
+
+  return null;
+}
+
+function addBusyInterval(
+  busyByDateKey: Map<string, Array<[number, number]>>,
+  dateKey: string,
+  startMinutes: number,
+  estimatedHours: number,
+) {
+  const durationMinutes = Math.max(15, Math.round(estimatedHours * 60 / 15) * 15);
+  const bucket = busyByDateKey.get(dateKey) ?? [];
+  bucket.push([startMinutes, startMinutes + durationMinutes]);
+  busyByDateKey.set(dateKey, bucket);
 }
 
 function isMetaTaskTitle(title: string) {
@@ -147,18 +392,36 @@ function titleSimilarity(left: string, right: string) {
   return overlap / Math.max(leftTokens.length, rightTokens.length);
 }
 
-function normalizePlannedTodo(todo: GeneratedTodo, todayStartUtc: number): PlannedTodo {
+function normalizePlannedTodo(
+  todo: GeneratedTodo,
+  todayStartUtc: number,
+  requireTaskDescriptions: boolean,
+): PlannedTodo {
   const parsedDueDate = parseDueDateToTimestamp(todo.dueDate);
   const dueDateTimestamp =
     parsedDueDate !== null && parsedDueDate > todayStartUtc
       ? parsedDueDate
       : todayStartUtc;
+  const priority = normalizePriority(todo.priority);
+  const estimatedHours =
+    normalizeEstimatedHours(todo.estimatedHours) ??
+    defaultEstimatedHoursForPriority(priority);
+  const timeBlockStart =
+    typeof todo.timeBlockStart === "number" && Number.isFinite(todo.timeBlockStart)
+      ? todo.timeBlockStart
+      : null;
 
   return {
     ...todo,
     title: normalizeTitleText(todo.title),
-    notes: sanitizeNotes(todo.notes),
-    priority: normalizePriority(todo.priority),
+    notes: normalizeNotesForPreference(
+      todo.title,
+      todo.notes,
+      requireTaskDescriptions,
+    ),
+    priority,
+    estimatedHours,
+    timeBlockStart,
     recurrence: normalizeRecurrence(todo.recurrence),
     dueDateTimestamp,
   };
@@ -174,13 +437,23 @@ function needsUpdate(
   const existingRecurrence = normalizeRecurrence(existingTodo.recurrence);
   const existingDueDate =
     typeof existingTodo.dueDate === "number" ? existingTodo.dueDate : null;
+  const existingEstimatedHours =
+    normalizeEstimatedHours(existingTodo.estimatedHours) ??
+    defaultEstimatedHoursForPriority(existingPriority);
+  const existingTimeBlockStart =
+    typeof existingTodo.timeBlockStart === "number" &&
+    Number.isFinite(existingTodo.timeBlockStart)
+      ? existingTodo.timeBlockStart
+      : null;
 
   return (
     existingTitle !== nextTodo.title ||
     existingNotes !== nextTodo.notes ||
     existingPriority !== nextTodo.priority ||
     existingRecurrence !== nextTodo.recurrence ||
-    existingDueDate !== nextTodo.dueDateTimestamp
+    existingDueDate !== nextTodo.dueDateTimestamp ||
+    existingEstimatedHours !== nextTodo.estimatedHours ||
+    existingTimeBlockStart !== nextTodo.timeBlockStart
   );
 }
 
@@ -188,7 +461,10 @@ export function planTodoReconciliation(
   generatedTodos: GeneratedTodo[],
   existingTodos: ExistingTodoForPlanning[],
   now = Date.now(),
+  options: ReconciliationOptions = {},
 ): TodoReconciliationPlan {
+  const autoSchedule = options.autoSchedule ?? true;
+  const requireTaskDescriptions = options.requireTaskDescriptions ?? true;
   const todayStartUtc = getStartOfUtcDay(now);
   const create: PlannedTodo[] = [];
   const update: PlannedTodoUpdate[] = [];
@@ -226,13 +502,28 @@ export function planTodoReconciliation(
 
   // Clean up existing task copy/readability even if no generated collision.
   for (const todo of keptOpenTodos) {
+    const normalizedPriority = normalizePriority(todo.priority);
+    const normalizedEstimatedHours =
+      normalizeEstimatedHours(todo.estimatedHours) ??
+      defaultEstimatedHoursForPriority(normalizedPriority);
+    const normalizedTimeBlockStart =
+      typeof todo.timeBlockStart === "number" && Number.isFinite(todo.timeBlockStart)
+        ? todo.timeBlockStart
+        : null;
+
     const cleaned: PlannedTodoUpdate = {
       id: todo.id,
       title: normalizeTitleText(todo.title),
-      notes: sanitizeNotes(todo.notes),
+      notes: normalizeNotesForPreference(
+        todo.title,
+        todo.notes,
+        requireTaskDescriptions,
+      ),
       dueDateTimestamp:
         typeof todo.dueDate === "number" ? todo.dueDate : todayStartUtc,
-      priority: normalizePriority(todo.priority),
+      estimatedHours: normalizedEstimatedHours,
+      timeBlockStart: normalizedTimeBlockStart,
+      priority: normalizedPriority,
       recurrence: normalizeRecurrence(todo.recurrence),
     };
 
@@ -252,10 +543,99 @@ export function planTodoReconciliation(
       return left.index - right.index;
     })
     .slice(0, MAX_TODOS_PER_RUN)
-    .map(({ todo }) => normalizePlannedTodo(todo, todayStartUtc));
+    .map(({ todo }) =>
+      normalizePlannedTodo(todo, todayStartUtc, requireTaskDescriptions),
+    );
+
+  const busyByDateKey = new Map<string, Array<[number, number]>>();
+  for (const todo of keptOpenTodos) {
+    if (
+      typeof todo.timeBlockStart !== "number" ||
+      !Number.isFinite(todo.timeBlockStart)
+    ) {
+      continue;
+    }
+
+    const dateKey = getDateKeyInTimezone(todo.timeBlockStart, TZ_PARTS_FORMATTER);
+    const hourMinute = getHourMinuteInTimezone(todo.timeBlockStart, TZ_PARTS_FORMATTER);
+    if (!dateKey || !hourMinute) {
+      continue;
+    }
+
+    const estimatedHours =
+      normalizeEstimatedHours(todo.estimatedHours) ??
+      defaultEstimatedHoursForPriority(normalizePriority(todo.priority));
+    const startMinutes = hourMinute.hour * 60 + hourMinute.minute;
+    addBusyInterval(busyByDateKey, dateKey, startMinutes, estimatedHours);
+  }
+
+  const scheduledGenerated = !autoSchedule
+    ? generatedUnique
+    : generatedUnique.map((todo) => {
+    const durationMinutes = Math.max(
+      15,
+      Math.round((todo.estimatedHours * 60) / 15) * 15,
+    );
+
+    if (typeof todo.timeBlockStart === "number" && Number.isFinite(todo.timeBlockStart)) {
+      const dateKey = getDateKeyInTimezone(todo.timeBlockStart, TZ_PARTS_FORMATTER);
+      const hourMinute = getHourMinuteInTimezone(todo.timeBlockStart, TZ_PARTS_FORMATTER);
+      if (dateKey && hourMinute) {
+        const startMinutes = hourMinute.hour * 60 + hourMinute.minute;
+        const busy = busyByDateKey.get(dateKey) ?? [];
+        const overlaps = busy.some(([busyStart, busyEnd]) =>
+          intervalsOverlap(
+            startMinutes,
+            startMinutes + durationMinutes,
+            busyStart,
+            busyEnd,
+          ),
+        );
+        if (
+          isIntervalWithinAvailability(dateKey, startMinutes, durationMinutes) &&
+          !overlaps
+        ) {
+          addBusyInterval(
+            busyByDateKey,
+            dateKey,
+            startMinutes,
+            todo.estimatedHours,
+          );
+          return todo;
+        }
+      }
+    }
+
+    const dateKey = new Date(todo.dueDateTimestamp).toISOString().slice(0, 10);
+    const suggestedStartMinutes = suggestTimeBlockStart(
+      dateKey,
+      todo.estimatedHours,
+      busyByDateKey,
+    );
+    if (suggestedStartMinutes === null) {
+      return todo;
+    }
+
+    const suggestedTimestamp = zonedDateTimeToUtcTimestamp(dateKey, suggestedStartMinutes);
+    if (suggestedTimestamp === null) {
+      return todo;
+    }
+
+    addBusyInterval(
+      busyByDateKey,
+      dateKey,
+      suggestedStartMinutes,
+      todo.estimatedHours,
+    );
+
+    return {
+      ...todo,
+      timeBlockStart: suggestedTimestamp,
+    };
+  });
 
   const seenGeneratedKeys = new Set<string>();
-  for (const generatedTodo of generatedUnique) {
+  for (const generatedTodo of scheduledGenerated) {
     const key = normalizeTitleKey(generatedTodo.title);
     if (!key || seenGeneratedKeys.has(key)) {
       continue;
@@ -281,6 +661,8 @@ export function planTodoReconciliation(
       title: generatedTodo.title,
       notes: generatedTodo.notes,
       dueDateTimestamp: generatedTodo.dueDateTimestamp,
+      estimatedHours: generatedTodo.estimatedHours,
+      timeBlockStart: generatedTodo.timeBlockStart,
       priority: generatedTodo.priority,
       recurrence: generatedTodo.recurrence,
     };
@@ -303,10 +685,201 @@ export function planTodoReconciliation(
   };
 }
 
+export function resolveNonOverlappingTimeBlocks(
+  existingTodos: ExistingTodoForPlanning[],
+  candidates: TimeBlockScheduleCandidate[],
+  options: TimeBlockScheduleOptions = {},
+) {
+  const todayStartUtc =
+    typeof options.todayStartUtc === "number" && Number.isFinite(options.todayStartUtc)
+      ? options.todayStartUtc
+      : getStartOfUtcDay(Date.now());
+  const allowOutsideAvailability = options.allowOutsideAvailability ?? false;
+  const results = new Map<string, number | null>();
+
+  const candidateTodoIds = new Set(
+    candidates
+      .map((candidate) =>
+        typeof candidate.existingTodoId === "string"
+          ? candidate.existingTodoId
+          : null,
+      )
+      .filter((value): value is string => value !== null),
+  );
+
+  const busyByDateKey = new Map<string, Array<[number, number]>>();
+  for (const todo of existingTodos) {
+    if (todo.status !== "open") {
+      continue;
+    }
+
+    if (candidateTodoIds.has(todo.id)) {
+      continue;
+    }
+
+    if (
+      typeof todo.timeBlockStart !== "number" ||
+      !Number.isFinite(todo.timeBlockStart)
+    ) {
+      continue;
+    }
+
+    const dateKey = getDateKeyInTimezone(todo.timeBlockStart, TZ_PARTS_FORMATTER);
+    const hourMinute = getHourMinuteInTimezone(todo.timeBlockStart, TZ_PARTS_FORMATTER);
+    if (!dateKey || !hourMinute) {
+      continue;
+    }
+
+    const estimatedHours =
+      normalizeEstimatedHours(todo.estimatedHours) ??
+      defaultEstimatedHoursForPriority(normalizePriority(todo.priority));
+    addBusyInterval(
+      busyByDateKey,
+      dateKey,
+      hourMinute.hour * 60 + hourMinute.minute,
+      estimatedHours,
+    );
+  }
+
+  const normalizedCandidates = candidates
+    .map((candidate, index) => {
+      const status = candidate.status ?? "open";
+      if (status !== "open") {
+        return null;
+      }
+
+      const priority = normalizePriority(candidate.priority);
+      const estimatedHours =
+        normalizeEstimatedHours(candidate.estimatedHours) ??
+        defaultEstimatedHoursForPriority(priority);
+      const dueDateTimestamp =
+        typeof candidate.dueDateTimestamp === "number" &&
+        Number.isFinite(candidate.dueDateTimestamp)
+          ? candidate.dueDateTimestamp
+          : todayStartUtc;
+      const normalizedTimeBlockStart =
+        typeof candidate.timeBlockStart === "number" &&
+        Number.isFinite(candidate.timeBlockStart)
+          ? candidate.timeBlockStart
+          : null;
+
+      return {
+        candidate,
+        index,
+        priority,
+        estimatedHours,
+        dueDateTimestamp,
+        normalizedTimeBlockStart,
+      };
+    })
+    .filter(
+      (
+        value,
+      ): value is {
+        candidate: TimeBlockScheduleCandidate;
+        index: number;
+        priority: 1 | 2 | 3;
+        estimatedHours: number;
+        dueDateTimestamp: number;
+        normalizedTimeBlockStart: number | null;
+      } => value !== null,
+    )
+    .sort((left, right) => {
+      if (left.priority !== right.priority) {
+        return left.priority - right.priority;
+      }
+
+      if (left.dueDateTimestamp !== right.dueDateTimestamp) {
+        return left.dueDateTimestamp - right.dueDateTimestamp;
+      }
+
+      return left.index - right.index;
+    });
+
+  for (const item of normalizedCandidates) {
+    const desiredDateKey = new Date(item.dueDateTimestamp).toISOString().slice(0, 10);
+    const durationMinutes = Math.max(
+      15,
+      Math.round((item.estimatedHours * 60) / 15) * 15,
+    );
+
+    let resolvedTimestamp: number | null = null;
+
+    if (item.normalizedTimeBlockStart !== null) {
+      const explicitDateKey = getDateKeyInTimezone(
+        item.normalizedTimeBlockStart,
+        TZ_PARTS_FORMATTER,
+      );
+      const explicitHourMinute = getHourMinuteInTimezone(
+        item.normalizedTimeBlockStart,
+        TZ_PARTS_FORMATTER,
+      );
+      if (explicitDateKey && explicitHourMinute) {
+        const explicitStartMinutes =
+          explicitHourMinute.hour * 60 + explicitHourMinute.minute;
+        const explicitEndsToday = explicitStartMinutes + durationMinutes <= 24 * 60;
+        const explicitWithinAvailability =
+          allowOutsideAvailability ||
+          isIntervalWithinAvailability(
+            explicitDateKey,
+            explicitStartMinutes,
+            durationMinutes,
+          );
+        const explicitBusy = busyByDateKey.get(explicitDateKey) ?? [];
+        const overlaps = explicitBusy.some(([busyStart, busyEnd]) =>
+          intervalsOverlap(
+            explicitStartMinutes,
+            explicitStartMinutes + durationMinutes,
+            busyStart,
+            busyEnd,
+          ),
+        );
+
+        if (explicitEndsToday && explicitWithinAvailability && !overlaps) {
+          resolvedTimestamp = item.normalizedTimeBlockStart;
+          addBusyInterval(
+            busyByDateKey,
+            explicitDateKey,
+            explicitStartMinutes,
+            item.estimatedHours,
+          );
+        }
+      }
+    }
+
+    if (resolvedTimestamp === null) {
+      const preferredStartMinutes = suggestTimeBlockStart(
+        desiredDateKey,
+        item.estimatedHours,
+        busyByDateKey,
+      );
+      const startMinutes = preferredStartMinutes;
+
+      if (startMinutes !== null) {
+        const timestamp = zonedDateTimeToUtcTimestamp(desiredDateKey, startMinutes);
+        if (timestamp !== null) {
+          resolvedTimestamp = timestamp;
+          addBusyInterval(
+            busyByDateKey,
+            desiredDateKey,
+            startMinutes,
+            item.estimatedHours,
+          );
+        }
+      }
+    }
+
+    results.set(item.candidate.key, resolvedTimestamp);
+  }
+
+  return results;
+}
+
 export function planGeneratedTodos(
   generatedTodos: GeneratedTodo[],
   existingTodos: ExistingTodoForPlanning[],
   now = Date.now(),
+  options: ReconciliationOptions = {},
 ): PlannedTodo[] {
-  return planTodoReconciliation(generatedTodos, existingTodos, now).create;
+  return planTodoReconciliation(generatedTodos, existingTodos, now, options).create;
 }

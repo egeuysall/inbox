@@ -13,6 +13,7 @@ import {
 
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS_PER_WINDOW = 10;
+const MAX_PASSWORD_LENGTH = 512;
 
 type LoginAttemptBucket = {
   attempts: number;
@@ -99,7 +100,10 @@ export async function POST(request: NextRequest) {
   if (rateLimit.limited) {
     const retryAfterSeconds = Math.max(1, Math.ceil((rateLimit.resetAt - Date.now()) / 1000));
     return NextResponse.json(
-      { error: "Too many attempts. Try again later." },
+      {
+        error: "Too many attempts. Try again later.",
+        retryAfterSeconds,
+      },
       {
         status: 429,
         headers: {
@@ -109,12 +113,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const payload = (await request.json().catch(() => null)) as { password?: unknown } | null;
+  const payload = (await request.json().catch(() => null)) as
+    | { password?: unknown }
+    | null;
   const password = payload?.password;
 
-  if (typeof password !== "string" || password.length === 0 || password.length > 512) {
+  if (
+    typeof password !== "string" ||
+    password.length === 0 ||
+    password.length > MAX_PASSWORD_LENGTH
+  ) {
     recordFailedLogin(clientAddress);
-    return NextResponse.json({ error: "Invalid password." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid request payload." }, { status: 400 });
   }
 
   if (!isValidPassword(password)) {

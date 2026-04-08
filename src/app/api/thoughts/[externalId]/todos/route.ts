@@ -76,6 +76,10 @@ export async function GET(
       notes: todo.notes,
       status: todo.status,
       dueDate: todo.dueDate ?? null,
+      estimatedHours:
+        typeof todo.estimatedHours === "number" ? todo.estimatedHours : null,
+      timeBlockStart:
+        typeof todo.timeBlockStart === "number" ? todo.timeBlockStart : null,
       priority: todo.priority ?? 2,
       recurrence: todo.recurrence ?? "none",
       source: todo.source ?? "manual",
@@ -112,6 +116,8 @@ export async function POST(
     title?: unknown;
     notes?: unknown;
     dueDate?: unknown;
+    estimatedHours?: unknown;
+    timeBlockStart?: unknown;
     recurrence?: unknown;
   } | null;
 
@@ -120,6 +126,8 @@ export async function POST(
     typeof body?.notes === "string" ? body.notes.trim().slice(0, 1200) || null : null;
   const dueDateInput = typeof body?.dueDate === "string" ? body.dueDate.trim() : null;
   const recurrenceInput = typeof body?.recurrence === "string" ? body.recurrence : "none";
+  const estimatedHoursInput = body?.estimatedHours;
+  const timeBlockStartInput = body?.timeBlockStart;
   const recurrence =
     recurrenceInput === "daily" ||
     recurrenceInput === "weekly" ||
@@ -132,6 +140,35 @@ export async function POST(
     dueDateInput && /^\d{4}-\d{2}-\d{2}$/.test(dueDateInput)
       ? Date.parse(`${dueDateInput}T00:00:00.000Z`)
       : null;
+  const estimatedHours =
+    typeof estimatedHoursInput === "number" &&
+    Number.isFinite(estimatedHoursInput) &&
+    estimatedHoursInput >= 0.25 &&
+    estimatedHoursInput <= 24
+      ? Math.round(estimatedHoursInput * 4) / 4
+      : null;
+  const timeBlockStart =
+    typeof timeBlockStartInput === "number" &&
+    Number.isFinite(timeBlockStartInput) &&
+    timeBlockStartInput > 0
+      ? timeBlockStartInput
+      : null;
+
+  if (
+    estimatedHoursInput !== undefined &&
+    estimatedHoursInput !== null &&
+    estimatedHours === null
+  ) {
+    return NextResponse.json({ error: "Invalid estimated hours." }, { status: 400 });
+  }
+
+  if (
+    timeBlockStartInput !== undefined &&
+    timeBlockStartInput !== null &&
+    timeBlockStart === null
+  ) {
+    return NextResponse.json({ error: "Invalid time block start." }, { status: 400 });
+  }
 
   if (!title) {
     return NextResponse.json({ error: "Todo title is required." }, { status: 400 });
@@ -148,6 +185,8 @@ export async function POST(
     title,
     notes,
     dueDate,
+    estimatedHours,
+    timeBlockStart,
     recurrence,
     source: "manual",
   });

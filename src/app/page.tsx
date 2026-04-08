@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 function normalizeFilter(value: string | string[] | undefined) {
   const candidate = Array.isArray(value) ? value[0] : value;
-  if (candidate === "upcoming" || candidate === "archive") {
+  if (candidate === "zen" || candidate === "upcoming" || candidate === "archive") {
     return candidate;
   }
 

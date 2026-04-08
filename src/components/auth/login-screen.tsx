@@ -12,7 +12,7 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { apiClient } from "@/lib/apiClient";
+import { ApiError, apiClient } from "@/lib/apiClient";
 
 type LoginScreenProps = {
   onAuthenticated: () => void;
@@ -22,6 +22,35 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+
+  const describeLoginError = (submitError: unknown) => {
+    if (submitError instanceof ApiError) {
+      if (submitError.status === 429 && submitError.retryAfterSeconds) {
+        const retryAfterMinutes = Math.ceil(submitError.retryAfterSeconds / 60);
+        if (retryAfterMinutes <= 1) {
+          return "Too many attempts. Try again in about a minute.";
+        }
+
+        return `Too many attempts. Try again in about ${retryAfterMinutes} minutes.`;
+      }
+
+      if (submitError.isTimeout) {
+        return "Sign-in timed out. Check your connection and try again.";
+      }
+
+      if (submitError.isNetworkError) {
+        return "Cannot reach the server. Check your network and try again.";
+      }
+
+      return submitError.message;
+    }
+
+    if (submitError instanceof Error) {
+      return submitError.message;
+    }
+
+    return "Unable to sign in.";
+  };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -38,11 +67,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
       await apiClient.login(password);
       onAuthenticated();
     } catch (submitError) {
-      if (submitError instanceof Error) {
-        setError(submitError.message);
-      } else {
-        setError("Unable to sign in.");
-      }
+      setError(describeLoginError(submitError));
     } finally {
       setIsPending(false);
     }
@@ -67,6 +92,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
                 <Input
                   id="access-key"
                   type="password"
+                  autoFocus
                   autoComplete="current-password"
                   value={password}
                   aria-invalid={Boolean(error)}

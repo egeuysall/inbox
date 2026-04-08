@@ -9,6 +9,7 @@ const recurrenceValidator = v.union(
   v.literal("monthly"),
 );
 const priorityValidator = v.union(v.literal(1), v.literal(2), v.literal(3));
+const nullableNumberValidator = v.union(v.number(), v.null());
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USER_TIMEZONE = "America/Chicago";
 const USER_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -58,6 +59,42 @@ function getNextRecurringDueDate(
   const date = new Date(baseDueDate);
   date.setUTCMonth(date.getUTCMonth() + 1);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function normalizeEstimatedHours(input: number | null | undefined) {
+  if (typeof input !== "number" || !Number.isFinite(input)) {
+    return null;
+  }
+
+  if (input < 0.25 || input > 24) {
+    return null;
+  }
+
+  return Math.round(input * 4) / 4;
+}
+
+function defaultEstimatedHoursForPriority(priority: 1 | 2 | 3) {
+  if (priority === 1) {
+    return 2;
+  }
+
+  if (priority === 2) {
+    return 1;
+  }
+
+  return 0.5;
+}
+
+function normalizeTimeBlockStart(input: number | null | undefined) {
+  if (input === null) {
+    return null;
+  }
+
+  if (typeof input !== "number" || !Number.isFinite(input) || input <= 0) {
+    return null;
+  }
+
+  return input;
 }
 
 export const byThought = query({
@@ -123,6 +160,8 @@ export const createMany = mutation({
         title: v.string(),
         notes: v.union(v.string(), v.null()),
         dueDate: v.union(v.number(), v.null()),
+        estimatedHours: v.optional(nullableNumberValidator),
+        timeBlockStart: v.optional(nullableNumberValidator),
         recurrence: recurrenceValidator,
         priority: priorityValidator,
         source: v.union(v.literal("ai"), v.literal("manual")),
@@ -135,6 +174,13 @@ export const createMany = mutation({
     const insertedIds = [];
 
     for (const item of args.items) {
+      const normalizedEstimatedHours =
+        normalizeEstimatedHours(item.estimatedHours) ??
+        defaultEstimatedHoursForPriority(item.priority);
+      const normalizedTimeBlockStart = normalizeTimeBlockStart(
+        item.timeBlockStart,
+      );
+
       const todoId = await ctx.db.insert("todos", {
         thoughtId: args.thoughtId,
         thoughtExternalId: args.thoughtExternalId,
@@ -142,6 +188,8 @@ export const createMany = mutation({
         notes: item.notes,
         status: "open",
         dueDate: item.dueDate ?? todayStartUtc,
+        estimatedHours: normalizedEstimatedHours,
+        timeBlockStart: normalizedTimeBlockStart,
         recurrence: item.recurrence,
         priority: item.priority,
         source: item.source,
@@ -161,12 +209,22 @@ export const createOne = mutation({
     title: v.string(),
     notes: v.union(v.string(), v.null()),
     dueDate: v.union(v.number(), v.null()),
+    estimatedHours: v.optional(nullableNumberValidator),
+    timeBlockStart: v.optional(nullableNumberValidator),
     recurrence: recurrenceValidator,
     priority: v.optional(priorityValidator),
     source: v.union(v.literal("ai"), v.literal("manual")),
   },
   handler: async (ctx, args) => {
     const todayStartUtc = getStartOfConfiguredDay(Date.now());
+    const normalizedPriority = args.priority ?? 2;
+    const normalizedEstimatedHours =
+      normalizeEstimatedHours(args.estimatedHours) ??
+      defaultEstimatedHoursForPriority(normalizedPriority);
+    const normalizedTimeBlockStart = normalizeTimeBlockStart(
+      args.timeBlockStart,
+    );
+
     return await ctx.db.insert("todos", {
       thoughtId: args.thoughtId,
       thoughtExternalId: args.thoughtExternalId,
@@ -174,8 +232,10 @@ export const createOne = mutation({
       notes: args.notes,
       status: "open",
       dueDate: args.dueDate ?? todayStartUtc,
+      estimatedHours: normalizedEstimatedHours,
+      timeBlockStart: normalizedTimeBlockStart,
       recurrence: args.recurrence,
-      priority: args.priority ?? 2,
+      priority: normalizedPriority,
       source: args.source,
       createdAt: Date.now(),
     });
@@ -217,6 +277,14 @@ export const updateStatus = mutation({
         notes: existingTodo.notes ?? null,
         status: "open",
         dueDate: nextDueDate,
+        estimatedHours:
+          normalizeEstimatedHours(existingTodo.estimatedHours) ??
+          defaultEstimatedHoursForPriority(
+            existingTodo.priority === 1 || existingTodo.priority === 3
+              ? existingTodo.priority
+              : 2,
+          ),
+        timeBlockStart: null,
         recurrence,
         priority:
           existingTodo.priority === 1 || existingTodo.priority === 3 ? existingTodo.priority : 2,
@@ -268,12 +336,16 @@ export const updateSchedule = mutation({
   args: {
     todoId: v.id("todos"),
     dueDate: v.optional(v.union(v.number(), v.null())),
+    estimatedHours: v.optional(nullableNumberValidator),
+    timeBlockStart: v.optional(nullableNumberValidator),
     recurrence: v.optional(recurrenceValidator),
     priority: v.optional(priorityValidator),
   },
   handler: async (ctx, args) => {
     const patch: {
       dueDate?: number | null;
+      estimatedHours?: number | null;
+      timeBlockStart?: number | null;
       recurrence?: "none" | "daily" | "weekly" | "monthly";
       priority?: 1 | 2 | 3;
     } = {};
@@ -282,6 +354,14 @@ export const updateSchedule = mutation({
 
     if (args.dueDate !== undefined) {
       patch.dueDate = args.dueDate ?? todayStartUtc;
+    }
+
+    if (args.estimatedHours !== undefined) {
+      patch.estimatedHours = normalizeEstimatedHours(args.estimatedHours);
+    }
+
+    if (args.timeBlockStart !== undefined) {
+      patch.timeBlockStart = normalizeTimeBlockStart(args.timeBlockStart);
     }
 
     if (args.recurrence !== undefined) {
@@ -303,6 +383,8 @@ export const updateFromAgent = mutation({
     title: v.optional(v.string()),
     notes: v.optional(v.union(v.string(), v.null())),
     dueDate: v.optional(v.union(v.number(), v.null())),
+    estimatedHours: v.optional(nullableNumberValidator),
+    timeBlockStart: v.optional(nullableNumberValidator),
     recurrence: v.optional(recurrenceValidator),
     priority: v.optional(priorityValidator),
   },
@@ -316,6 +398,8 @@ export const updateFromAgent = mutation({
       title?: string;
       notes?: string | null;
       dueDate?: number | null;
+      estimatedHours?: number | null;
+      timeBlockStart?: number | null;
       recurrence?: "none" | "daily" | "weekly" | "monthly";
       priority?: 1 | 2 | 3;
     } = {};
@@ -330,6 +414,14 @@ export const updateFromAgent = mutation({
 
     if (args.dueDate !== undefined) {
       patch.dueDate = args.dueDate ?? getStartOfConfiguredDay(Date.now());
+    }
+
+    if (args.estimatedHours !== undefined) {
+      patch.estimatedHours = normalizeEstimatedHours(args.estimatedHours);
+    }
+
+    if (args.timeBlockStart !== undefined) {
+      patch.timeBlockStart = normalizeTimeBlockStart(args.timeBlockStart);
     }
 
     if (args.recurrence !== undefined) {

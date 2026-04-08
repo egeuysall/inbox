@@ -9,9 +9,21 @@ import {
   upsertLocalThought,
   upsertManyLocalThoughts,
 } from "@/lib/indexedDb";
-import type { LocalThought, ThoughtRecord, TodoItem, TodoStatus } from "@/lib/types";
+import type {
+  GenerationPreferences,
+  LocalThought,
+  ThoughtRecord,
+  TodoItem,
+  TodoStatus,
+} from "@/lib/types";
 
 const POLL_INTERVAL_MS = 15_000;
+const AI_AUTO_SCHEDULE_STORAGE_KEY = "ibx:ai-auto-schedule";
+const AI_INCLUDE_LINKS_STORAGE_KEY = "ibx:ai-include-links";
+const AI_REQUIRE_DESCRIPTIONS_STORAGE_KEY = "ibx:ai-require-descriptions";
+const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
+const DEFAULT_AVAILABILITY_NOTES =
+  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM.";
 
 function sortThoughts(items: LocalThought[]) {
   return [...items].sort((a, b) => b.createdAt - a.createdAt);
@@ -50,6 +62,37 @@ function parseErrorMessage(error: unknown) {
   }
 
   return "Unexpected error.";
+}
+
+function readStoredGenerationPreferences(): GenerationPreferences {
+  if (typeof window === "undefined") {
+    return {
+      autoSchedule: true,
+      includeRelevantLinks: true,
+      requireTaskDescriptions: true,
+      availabilityNotes: DEFAULT_AVAILABILITY_NOTES,
+    };
+  }
+
+  try {
+    const availabilityNotes = window.localStorage.getItem(AI_AVAILABILITY_NOTES_STORAGE_KEY);
+    return {
+      autoSchedule: window.localStorage.getItem(AI_AUTO_SCHEDULE_STORAGE_KEY) !== "0",
+      includeRelevantLinks:
+        window.localStorage.getItem(AI_INCLUDE_LINKS_STORAGE_KEY) !== "0",
+      requireTaskDescriptions:
+        window.localStorage.getItem(AI_REQUIRE_DESCRIPTIONS_STORAGE_KEY) !== "0",
+      availabilityNotes:
+        availabilityNotes?.trim()?.slice(0, 640) || DEFAULT_AVAILABILITY_NOTES,
+    };
+  } catch {
+    return {
+      autoSchedule: true,
+      includeRelevantLinks: true,
+      requireTaskDescriptions: true,
+      availabilityNotes: DEFAULT_AVAILABILITY_NOTES,
+    };
+  }
 }
 
 export function useThoughts(isOnline: boolean) {
@@ -286,7 +329,7 @@ export function useThoughts(isOnline: boolean) {
       );
 
       try {
-        await apiClient.generateTodos(externalId);
+        await apiClient.generateTodos(externalId, readStoredGenerationPreferences());
         await Promise.all([refreshFromServer(), loadTodosForThought(externalId)]);
         setLastError(null);
       } catch (error) {

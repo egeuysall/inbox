@@ -20,6 +20,14 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import {
   Popover,
@@ -29,12 +37,13 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
+  SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
@@ -44,7 +53,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useOfflineStatus } from "@/hooks/useOfflineStatus";
 import { useTheme } from "@/hooks/useTheme";
-import { apiClient, ApiError } from "@/lib/apiClient";
+import { UNAUTHORIZED_EVENT_NAME, apiClient, ApiError } from "@/lib/apiClient";
 import {
   addQueuedPrompt,
   getCachedTodos,
@@ -54,19 +63,33 @@ import {
   setCachedTodos,
 } from "@/lib/indexedDb";
 import { cn } from "@/lib/utils";
-import type { TodoItem, TodoPriority, TodoRecurrence } from "@/lib/types";
+import type {
+  GenerationPreferences,
+  TodoItem,
+  TodoPriority,
+  TodoRecurrence,
+} from "@/lib/types";
 
 type AppShellProps = {
   initialAuthenticated: boolean;
   initialFilter?: TodoFilter;
 };
+type UnauthorizedEventDetail = {
+  message?: string;
+};
 
 const PROMPT_INPUT_STORAGE_KEY = "ibx:prompt-input";
 const FILTER_STORAGE_KEY = "ibx:active-view";
 const PROMPT_AUTOFOCUS_STORAGE_KEY = "ibx:prompt-autofocus";
+const TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY = "ibx:time-block-notifications";
+const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
+const DEFAULT_AVAILABILITY_NOTES =
+  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM.";
 const SHORTCUT_CAPTURE_KEY_PREFIX = "ibx:shortcut-capture:";
 const NOTE_PREVIEW_LENGTH = 160;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const NOTIFICATION_PRESTART_MS = 5 * 60 * 1000;
+const NOTIFICATION_LATE_GRACE_MS = 2 * 60 * 1000;
 const HOLD_PROGRESS_DELAY_MS = 160;
 const HOLD_PROGRESS_SWEEP_MS = 300;
 const HOLD_TO_TOGGLE_MS = HOLD_PROGRESS_DELAY_MS + HOLD_PROGRESS_SWEEP_MS;
@@ -83,14 +106,64 @@ const UTC_SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   day: "2-digit",
   timeZone: "UTC",
 });
-const LOCAL_STATUS_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  hour12: true,
+const TIME_BLOCK_CLOCK_OPTIONS = Array.from({ length: 96 }, (_, index) => {
+  const hours = Math.floor(index / 4);
+  const minutes = (index % 4) * 15;
+  const value = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
+    2,
+    "0",
+  )}`;
+  const date = new Date(2020, 0, 1, hours, minutes, 0, 0);
+  const label = date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  return { value, label: label.toLowerCase() };
 });
+
+function getNearestQuarterHourIndex(date: Date) {
+  const totalMinutes = date.getHours() * 60 + date.getMinutes();
+  const roundedQuarter = Math.round(totalMinutes / 15);
+  return Math.min(95, Math.max(0, roundedQuarter));
+}
+
+function scrollTimeComboboxNearCurrentTime() {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      const popup =
+        document.querySelector<HTMLElement>(
+          '[data-slot="combobox-content"][data-time-block-combobox="1"][data-open]',
+        ) ??
+        document.querySelector<HTMLElement>(
+          '[data-slot="combobox-content"][data-time-block-combobox="1"]',
+        );
+      if (!popup) {
+        return;
+      }
+
+      const items = popup.querySelectorAll<HTMLElement>(
+        '[data-slot="combobox-item"]',
+      );
+      if (items.length === 0) {
+        return;
+      }
+
+      const targetIndex = Math.min(
+        items.length - 1,
+        getNearestQuarterHourIndex(new Date()),
+      );
+      items[targetIndex]?.scrollIntoView({
+        block: "center",
+      });
+    });
+  });
+}
 
 function readStoredPromptInput() {
   if (typeof window === "undefined") {
@@ -125,6 +198,51 @@ function readStoredPromptAutofocus() {
     return window.localStorage.getItem(PROMPT_AUTOFOCUS_STORAGE_KEY) !== "0";
   } catch {
     return true;
+  }
+}
+
+function readStoredTimeBlockNotifications() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  try {
+    return (
+      window.localStorage.getItem(TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY) !== "0"
+    );
+  } catch {
+    return true;
+  }
+}
+
+function readStoredGenerationPreferences(): GenerationPreferences {
+  if (typeof window === "undefined") {
+    return {
+      autoSchedule: true,
+      includeRelevantLinks: true,
+      requireTaskDescriptions: true,
+      availabilityNotes: DEFAULT_AVAILABILITY_NOTES,
+    };
+  }
+
+  try {
+    const availabilityNotes = window.localStorage.getItem(
+      AI_AVAILABILITY_NOTES_STORAGE_KEY,
+    );
+    return {
+      autoSchedule: true,
+      includeRelevantLinks: true,
+      requireTaskDescriptions: true,
+      availabilityNotes:
+        availabilityNotes?.trim()?.slice(0, 640) || DEFAULT_AVAILABILITY_NOTES,
+    };
+  } catch {
+    return {
+      autoSchedule: true,
+      includeRelevantLinks: true,
+      requireTaskDescriptions: true,
+      availabilityNotes: DEFAULT_AVAILABILITY_NOTES,
+    };
   }
 }
 
@@ -205,10 +323,6 @@ function displayDateInputValue(timestamp: number | null) {
   return formatDateKey(dateKey, UTC_SHORT_DATE_FORMATTER);
 }
 
-function getLocalStatusLabel(timestamp: number) {
-  return LOCAL_STATUS_TIME_FORMATTER.format(new Date(timestamp)).toLowerCase();
-}
-
 function parseErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
     return error.message;
@@ -219,6 +333,185 @@ function parseErrorMessage(error: unknown) {
   }
 
   return "Unexpected error";
+}
+
+function toastApiError(error: unknown) {
+  if (error instanceof ApiError && error.status === 401) {
+    return;
+  }
+
+  toast.error(parseErrorMessage(error));
+}
+
+function normalizeEstimatedHours(hours: number | null | undefined) {
+  if (typeof hours !== "number" || !Number.isFinite(hours) || hours <= 0) {
+    return null;
+  }
+
+  return Math.round(hours * 4) / 4;
+}
+
+function formatEstimatedHoursInput(hours: number | null | undefined) {
+  const normalizedHours = normalizeEstimatedHours(hours);
+  if (normalizedHours === null) {
+    return "";
+  }
+
+  const totalMinutes = Math.round(normalizedHours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const remainderMinutes = totalMinutes % 60;
+
+  if (wholeHours > 0 && remainderMinutes > 0) {
+    return `${wholeHours}h ${remainderMinutes}m`;
+  }
+
+  if (wholeHours > 0) {
+    return `${wholeHours}h`;
+  }
+
+  return `${remainderMinutes}m`;
+}
+
+function parseEstimatedHoursInput(input: string) {
+  const trimmed = input.trim().toLowerCase();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  let parsedHours: number | null = null;
+
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    parsedHours = Number(trimmed);
+  } else if (/^\d{1,2}:\d{2}$/.test(trimmed)) {
+    const [hoursText, minutesText] = trimmed.split(":");
+    const hours = Number(hoursText);
+    const minutes = Number(minutesText);
+    if (
+      Number.isInteger(hours) &&
+      Number.isInteger(minutes) &&
+      hours >= 0 &&
+      minutes >= 0 &&
+      minutes <= 59
+    ) {
+      parsedHours = hours + minutes / 60;
+    }
+  } else {
+    const durationPattern =
+      /(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes)\b/g;
+    const matches = Array.from(trimmed.matchAll(durationPattern));
+    if (matches.length === 0) {
+      return undefined;
+    }
+
+    const leftover = trimmed
+      .replace(/\band\b/g, " ")
+      .replace(durationPattern, " ")
+      .replace(/\s+/g, "");
+    if (leftover.length > 0) {
+      return undefined;
+    }
+
+    let totalMinutes = 0;
+    for (const match of matches) {
+      const value = Number(match[1]);
+      const unit = match[2];
+      if (!Number.isFinite(value) || value <= 0 || !unit) {
+        return undefined;
+      }
+
+      if (unit.startsWith("h")) {
+        totalMinutes += value * 60;
+      } else {
+        totalMinutes += value;
+      }
+    }
+
+    parsedHours = totalMinutes / 60;
+  }
+
+  if (parsedHours === null || !Number.isFinite(parsedHours)) {
+    return undefined;
+  }
+
+  if (parsedHours < 0.25 || parsedHours > 24) {
+    return undefined;
+  }
+
+  return Math.round(parsedHours * 4) / 4;
+}
+
+function displayEstimatedHours(hours: number | null | undefined) {
+  const formatted = formatEstimatedHoursInput(hours);
+  if (!formatted) {
+    return "hours: unsized";
+  }
+
+  return `hours: ${formatted}`;
+}
+
+function sumEstimatedHours(todos: TodoItem[]) {
+  return todos.reduce((total, todo) => {
+    const estimatedHours = normalizeEstimatedHours(todo.estimatedHours);
+    return total + (estimatedHours ?? 0);
+  }, 0);
+}
+
+function displayTimeBlock(
+  timestamp: number | null,
+  estimatedHours: number | null,
+) {
+  if (typeof timestamp !== "number") {
+    return "block: unscheduled";
+  }
+
+  const startDate = new Date(timestamp);
+  const endDate = new Date(
+    timestamp + (normalizeEstimatedHours(estimatedHours) ?? 1) * 60 * 60 * 1000,
+  );
+
+  const startLabel = startDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const endLabel = endDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  return `block: ${startLabel.toLowerCase()} - ${endLabel.toLowerCase()}`;
+}
+
+function displayTimeBlockClockValue(timestamp: number | null) {
+  if (typeof timestamp !== "number") {
+    return "";
+  }
+
+  const date = new Date(timestamp);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function compareByPriorityAndStartTime(left: TodoItem, right: TodoItem) {
+  const leftPriority = normalizeTodoPriority(left.priority);
+  const rightPriority = normalizeTodoPriority(right.priority);
+  if (leftPriority !== rightPriority) {
+    return leftPriority - rightPriority;
+  }
+
+  const leftStart = left.timeBlockStart ?? Number.MAX_SAFE_INTEGER;
+  const rightStart = right.timeBlockStart ?? Number.MAX_SAFE_INTEGER;
+  if (leftStart !== rightStart) {
+    return leftStart - rightStart;
+  }
+
+  const leftDueDate = left.dueDate ?? Number.MAX_SAFE_INTEGER;
+  const rightDueDate = right.dueDate ?? Number.MAX_SAFE_INTEGER;
+  if (leftDueDate !== rightDueDate) {
+    return leftDueDate - rightDueDate;
+  }
+
+  return right.createdAt - left.createdAt;
 }
 
 function displayRecurrence(recurrence: TodoRecurrence) {
@@ -249,6 +542,154 @@ function getPreviewNotes(notes: string) {
   }
 
   return `${notes.slice(0, NOTE_PREVIEW_LENGTH)}…`;
+}
+
+type TodoResourceLink = {
+  url: string;
+  label: string;
+};
+
+const NOTE_URL_REGEX = /\bhttps?:\/\/[^\s<>()]+/gi;
+const NOTE_DOMAIN_REGEX =
+  /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>()]*)?/gi;
+
+function normalizeNoteUrl(rawUrl: string) {
+  const trimmed = rawUrl.replace(/[),.;!?]+$/g, "");
+  const withProtocol = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function getTodoResourceLinks(notes: string | null): TodoResourceLink[] {
+  if (!notes) {
+    return [];
+  }
+
+  const matches = [
+    ...(notes.match(NOTE_URL_REGEX) ?? []),
+    ...(notes.match(NOTE_DOMAIN_REGEX) ?? []),
+  ];
+  if (matches.length === 0) {
+    return [];
+  }
+
+  const links: TodoResourceLink[] = [];
+  const seen = new Set<string>();
+  for (const match of matches) {
+    const normalized = normalizeNoteUrl(match);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+
+    let label = normalized;
+    try {
+      const parsed = new URL(normalized);
+      const path =
+        parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "";
+      label = `${parsed.hostname}${path}`.slice(0, 64);
+    } catch {
+      // Keep normalized URL label fallback.
+    }
+
+    links.push({ url: normalized, label });
+  }
+
+  return links;
+}
+
+function parseTodoLinksInput(value: string) {
+  const tokens = value
+    .split(/[\s,]+/g)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  const normalizedLinks: string[] = [];
+  const seen = new Set<string>();
+  let invalidCount = 0;
+
+  for (const token of tokens) {
+    const withProtocol = /^https?:\/\//i.test(token)
+      ? token
+      : /^[^\s]+\.[^\s]+$/.test(token)
+        ? `https://${token}`
+        : null;
+    const normalized = withProtocol ? normalizeNoteUrl(withProtocol) : null;
+
+    if (!normalized) {
+      invalidCount += 1;
+      continue;
+    }
+
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      normalizedLinks.push(normalized);
+    }
+  }
+
+  return {
+    links: normalizedLinks,
+    invalidCount,
+  };
+}
+
+function getTodoLinksInputValue(notes: string | null) {
+  return getTodoResourceLinks(notes)
+    .map((link) => link.url)
+    .join(", ");
+}
+
+function stripTodoLinksFromNotes(notes: string | null) {
+  if (!notes) {
+    return null;
+  }
+
+  const stripped = notes
+    .replace(NOTE_URL_REGEX, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped || null;
+}
+
+function buildTodoNotesWithLinks(description: string | null, links: string[]) {
+  const parts: string[] = [];
+  if (description) {
+    parts.push(description);
+  }
+  if (links.length > 0) {
+    parts.push(links.join(" "));
+  }
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return parts.join("\n");
+}
+
+function areStringListsEqual(a: string[], b: string[]) {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function isInteractiveTarget(target: EventTarget | null) {
@@ -347,7 +788,16 @@ function formatSectionDateLabel(
   return relativeLabel ? `${formattedDate} // ${relativeLabel}` : formattedDate;
 }
 
-type TodoFilter = "today" | "upcoming" | "archive";
+function formatSectionHoursLabel(todos: TodoItem[]) {
+  const totalHours = sumEstimatedHours(todos);
+  if (totalHours <= 0) {
+    return "unsized";
+  }
+
+  return formatEstimatedHoursInput(totalHours);
+}
+
+type TodoFilter = "zen" | "today" | "upcoming" | "archive";
 type TodoSection = {
   key: string;
   label: string | null;
@@ -367,7 +817,7 @@ const TODAY_PRIORITY_LABELS: Record<TodoPriority, string> = {
 };
 
 function normalizeFilter(value: string | null | undefined): TodoFilter {
-  if (value === "upcoming" || value === "archive") {
+  if (value === "zen" || value === "upcoming" || value === "archive") {
     return value;
   }
 
@@ -464,14 +914,20 @@ function clearShortcutPayloadFromLocation(
   window.history.replaceState(null, "", nextUrl);
 }
 
-export function AppShell({ initialAuthenticated }: AppShellProps) {
+export function AppShell({
+  initialAuthenticated,
+  initialFilter = "today",
+}: AppShellProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   useTheme();
   const isOnline = useOfflineStatus();
 
   const [isAuthenticated, setIsAuthenticated] = useState(initialAuthenticated);
-  const [filter, setFilter] = useState<TodoFilter>("today");
+  const [filter, setFilter] = useState<TodoFilter>(initialFilter);
+  const [timeBlockNotificationsEnabled, setTimeBlockNotificationsEnabled] =
+    useState(false);
+  const pushUpdatesEnabled = true;
   const [promptInput, setPromptInput] = useState("");
   const [promptAutofocus, setPromptAutofocus] = useState(false);
   const [hasHydratedPreferences, setHasHydratedPreferences] = useState(false);
@@ -482,8 +938,12 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
   const [queuedPromptCount, setQueuedPromptCount] = useState(0);
   const [pendingTodoId, setPendingTodoId] = useState<string | null>(null);
+  const [justCompletedZenTodoId, setJustCompletedZenTodoId] = useState<
+    string | null
+  >(null);
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
   const [editingTitleInput, setEditingTitleInput] = useState("");
+  const [editingLinksInput, setEditingLinksInput] = useState("");
   const [holdingTodoId, setHoldingTodoId] = useState<string | null>(null);
   const [todoPendingDelete, setTodoPendingDelete] = useState<TodoItem | null>(
     null,
@@ -492,7 +952,6 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   const [expandedNoteIds, setExpandedNoteIds] = useState<
     Record<string, boolean>
   >({});
-  const [currentTimestamp, setCurrentTimestamp] = useState(() => Date.now());
   const promptInputRef = useRef<HTMLInputElement | null>(null);
   const hasAppliedInitialAutofocus = useRef(false);
   const isQueueFlushRunning = useRef(false);
@@ -501,8 +960,11 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   const holdStartedAtRef = useRef<number | null>(null);
   const holdStartRef = useRef<{ x: number; y: number } | null>(null);
   const heldTodoIdRef = useRef<string | null>(null);
+  const openedEditOnPointerDownTodoIdRef = useRef<string | null>(null);
   const suppressNextClickRef = useRef(false);
   const isShortcutConsumeRunning = useRef(false);
+  const lastUnauthorizedToastAtRef = useRef(0);
+  const notifiedTimeBlocksRef = useRef<Set<string>>(new Set());
 
   const clearHoldTimer = useCallback(() => {
     if (holdTimerRef.current !== null) {
@@ -531,6 +993,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
 
   useEffect(() => {
     setFilter(readStoredFilter());
+    setTimeBlockNotificationsEnabled(readStoredTimeBlockNotifications());
     setPromptInput(readStoredPromptInput());
     setPromptAutofocus(readStoredPromptAutofocus());
     setHasHydratedPreferences(true);
@@ -542,6 +1005,40 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     },
     [cancelHoldInteraction],
   );
+
+  useEffect(() => {
+    if (!editingTodoId) {
+      return;
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      // Keep the edit panel open while interacting with the active row
+      // or with portal-based popovers/calendar content.
+      const insideActiveRow = Boolean(
+        target.closest(`[data-todo-article-id="${editingTodoId}"]`),
+      );
+      const insideOverlay = Boolean(
+        target.closest("[data-radix-popper-content-wrapper]") ||
+          target.closest("[data-slot='combobox-content']"),
+      );
+
+      if (insideActiveRow || insideOverlay) {
+        return;
+      }
+
+      setEditingTodoId(null);
+      setEditingTitleInput("");
+      setEditingLinksInput("");
+    };
+
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, [editingTodoId]);
 
   useEffect(() => {
     if (!hasHydratedPreferences) {
@@ -567,6 +1064,40 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     }
   }, [filter, hasHydratedPreferences]);
 
+  useEffect(() => {
+    const onUnauthorized = (event: Event) => {
+      if (!isAuthenticated) {
+        return;
+      }
+
+      const unauthorizedEvent = event as CustomEvent<UnauthorizedEventDetail>;
+      setIsAuthenticated(false);
+      setHasLoadedTodos(false);
+      setTodos([]);
+      setQueuedPromptCount(0);
+
+      const now = Date.now();
+      if (now - lastUnauthorizedToastAtRef.current < 1_500) {
+        return;
+      }
+
+      lastUnauthorizedToastAtRef.current = now;
+      toast.error(
+        unauthorizedEvent.detail?.message ?? "Session expired. Sign in again.",
+      );
+    };
+
+    window.addEventListener(
+      UNAUTHORIZED_EVENT_NAME,
+      onUnauthorized as EventListener,
+    );
+    return () =>
+      window.removeEventListener(
+        UNAUTHORIZED_EVENT_NAME,
+        onUnauthorized as EventListener,
+      );
+  }, [isAuthenticated]);
+
   const refreshTodos = useCallback(
     async (showLoading = false) => {
       if (!isAuthenticated) {
@@ -586,7 +1117,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
         setTodos(sortTodos(nextTodos));
         setHasLoadedTodos(true);
       } catch (error) {
-        toast.error(parseErrorMessage(error));
+        toastApiError(error);
       } finally {
         if (showLoading) {
           setIsLoadingTodos(false);
@@ -639,6 +1170,8 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       }
 
       let createdTodos = 0;
+      let updatedTodos = 0;
+      let deletedTodos = 0;
       let failedItems = 0;
 
       for (const item of queue) {
@@ -650,8 +1183,13 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
         });
 
         try {
-          const result = await apiClient.generateTodosFromInput(item.text);
+          const result = await apiClient.generateTodosFromInput(
+            item.text,
+            readStoredGenerationPreferences(),
+          );
           createdTodos += result.created;
+          updatedTodos += result.updated ?? 0;
+          deletedTodos += result.deleted ?? 0;
           await removeQueuedPrompt(item.id);
         } catch (error) {
           failedItems += 1;
@@ -665,8 +1203,10 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
 
       await refreshQueuedPromptCount();
 
-      if (createdTodos > 0) {
-        toast.message(`generated ${createdTodos} queued todos`);
+      if (createdTodos > 0 || updatedTodos > 0 || deletedTodos > 0) {
+        toast.message(
+          `ai applied queued changes: +${createdTodos} / ~${updatedTodos} / -${deletedTodos}`,
+        );
       }
 
       if (failedItems > 0) {
@@ -727,14 +1267,6 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   }, [flushQueuedPrompts, isAuthenticated, isOnline]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setCurrentTimestamp(Date.now());
-    }, 30_000);
-
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     if (!isAuthenticated) {
       return;
     }
@@ -746,6 +1278,155 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
 
     return () => window.clearInterval(timer);
   }, [flushQueuedPrompts, isAuthenticated, refreshTodos]);
+
+  useEffect(() => {
+    if (
+      !isAuthenticated ||
+      !timeBlockNotificationsEnabled ||
+      typeof window === "undefined" ||
+      !("Notification" in window)
+    ) {
+      return;
+    }
+
+    if (Notification.permission === "default") {
+      void Notification.requestPermission().then((permission) => {
+        if (permission !== "granted") {
+          try {
+            window.localStorage.setItem(
+              TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY,
+              "0",
+            );
+          } catch {
+            // Ignore localStorage failures.
+          }
+          setTimeBlockNotificationsEnabled(false);
+        }
+      });
+      return;
+    }
+
+    const canUseServiceWorkerNotifications =
+      pushUpdatesEnabled && "serviceWorker" in navigator;
+
+    const timestampTriggerCtor = (
+      window as typeof window & {
+        TimestampTrigger?: new (timestamp: number) => unknown;
+      }
+    ).TimestampTrigger;
+    const canUseNotificationTriggers =
+      canUseServiceWorkerNotifications && typeof timestampTriggerCtor === "function";
+
+    const showTimeBlockNotification = async (
+      todo: TodoItem,
+      notificationTag: string,
+      fireAt: number,
+    ) => {
+      const startLabel = new Date(todo.timeBlockStart ?? Date.now())
+        .toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        })
+        .toLowerCase();
+      const body = `${todo.title} • ${displayEstimatedHours(
+        todo.estimatedHours,
+      )} starts at ${startLabel}.`;
+      const todayDateKey = getLocalDateKey(Date.now());
+      const targetView = isTodoOnDateKey(todo.dueDate, todayDateKey)
+        ? "today"
+        : "upcoming";
+      const now = Date.now();
+
+      if (canUseServiceWorkerNotifications) {
+        try {
+          const registration = await navigator.serviceWorker.getRegistration();
+          if (registration) {
+            if (canUseNotificationTriggers && fireAt > now) {
+              await registration.showNotification("Upcoming ibx block", {
+                tag: notificationTag,
+                body,
+                data: {
+                  url: `/?view=${targetView}`,
+                },
+                showTrigger: new timestampTriggerCtor(fireAt),
+              } as NotificationOptions);
+              return;
+            }
+
+            if (fireAt > now) {
+              return;
+            }
+
+            await registration.showNotification(
+              "Upcoming ibx block",
+              {
+                tag: notificationTag,
+                body,
+                data: {
+                  url: `/?view=${targetView}`,
+                },
+              },
+            );
+            return;
+          }
+        } catch {
+          // Fall through to direct notification API.
+        }
+      }
+
+      if (fireAt > now) {
+        return;
+      }
+
+      new Notification("Upcoming ibx block", {
+        tag: notificationTag,
+        body,
+      });
+    };
+
+    const maybeNotifyUpcomingBlocks = async () => {
+      if (Notification.permission !== "granted") {
+        return;
+      }
+
+      const now = Date.now();
+      for (const todo of todos) {
+        if (todo.status !== "open" || typeof todo.timeBlockStart !== "number") {
+          continue;
+        }
+
+        const fireAt = todo.timeBlockStart - NOTIFICATION_PRESTART_MS;
+        const millisecondsUntilFire = fireAt - now;
+        if (millisecondsUntilFire < -NOTIFICATION_LATE_GRACE_MS) {
+          continue;
+        }
+
+        const notificationTag = `todo-block-prestart:${todo.id}:${todo.timeBlockStart}`;
+        if (notifiedTimeBlocksRef.current.has(notificationTag)) {
+          continue;
+        }
+
+        try {
+          await showTimeBlockNotification(todo, notificationTag, fireAt);
+          notifiedTimeBlocksRef.current.add(notificationTag);
+        } catch {
+          // Ignore notification delivery failures; UI should remain usable.
+        }
+      }
+    };
+
+    void maybeNotifyUpcomingBlocks();
+    const timer = window.setInterval(() => {
+      void maybeNotifyUpcomingBlocks();
+    }, 60_000);
+
+    return () => window.clearInterval(timer);
+  }, [
+    isAuthenticated,
+    pushUpdatesEnabled,
+    timeBlockNotificationsEnabled,
+    todos,
+  ]);
 
   const focusPromptInputAtEnd = useCallback(
     (force = false) => {
@@ -816,8 +1497,15 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       return;
     }
 
-    setFilter(normalizeFilter(viewParam));
-  }, [hasHydratedPreferences, searchParams]);
+    const normalizedView = normalizeFilter(viewParam);
+    setFilter(normalizedView);
+
+    if (normalizedView !== viewParam) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("view", normalizedView);
+      router.replace(`/?${params.toString()}`, { scroll: false });
+    }
+  }, [hasHydratedPreferences, router, searchParams]);
 
   useEffect(() => {
     if (!hasHydratedPreferences) {
@@ -938,6 +1626,12 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       }
 
       if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+        if (event.code === "KeyZ") {
+          event.preventDefault();
+          setActiveFilter("zen");
+          return;
+        }
+
         if (event.code === "KeyJ") {
           event.preventDefault();
           setActiveFilter("today");
@@ -953,6 +1647,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
         if (event.code === "KeyL") {
           event.preventDefault();
           setActiveFilter("archive");
+          return;
         }
       }
     };
@@ -991,7 +1686,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
 
       await flushQueuedPrompts();
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toastApiError(error);
     } finally {
       setIsGenerating(false);
     }
@@ -1000,6 +1695,9 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   const updateTodoStatus = async (todo: TodoItem, checked: boolean) => {
     const nextStatus = checked ? "done" : "open";
     setPendingTodoId(todo.id);
+    if (checked) {
+      setJustCompletedZenTodoId(todo.id);
+    }
     setTodos((previousTodos) =>
       sortTodos(
         previousTodos.map((item) =>
@@ -1017,7 +1715,10 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       await apiClient.updateTodo(todo.id, { status: nextStatus });
       await refreshTodos();
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toastApiError(error);
+      if (checked) {
+        setJustCompletedZenTodoId(null);
+      }
       setTodos((previousTodos) =>
         sortTodos(
           previousTodos.map((item) =>
@@ -1036,14 +1737,134 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
   };
 
   const updateTodoDate = async (todo: TodoItem, nextDate: string) => {
+    const normalizedDate = nextDate.trim();
+    const dueDate = normalizedDate ? normalizedDate : null;
+    const nextTimeBlockStart =
+      normalizedDate && typeof todo.timeBlockStart === "number"
+        ? Date.parse(
+            `${normalizedDate}T${
+              displayTimeBlockClockValue(todo.timeBlockStart).trim() || "18:00"
+            }`,
+          )
+        : undefined;
+    const normalizedTimeBlockStart =
+      typeof nextTimeBlockStart === "number" &&
+      Number.isFinite(nextTimeBlockStart) &&
+      nextTimeBlockStart > 0
+        ? nextTimeBlockStart
+        : undefined;
+
     setPendingTodoId(todo.id);
     try {
       await apiClient.updateTodo(todo.id, {
-        dueDate: nextDate.trim() ? nextDate : null,
+        dueDate,
+        ...(normalizedDate && normalizedTimeBlockStart !== undefined
+          ? { timeBlockStart: normalizedTimeBlockStart }
+          : {}),
       });
       await refreshTodos();
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toastApiError(error);
+    } finally {
+      setPendingTodoId(null);
+    }
+  };
+
+  const updateTodoEstimatedHours = async (
+    todo: TodoItem,
+    nextEstimatedHours: string,
+  ) => {
+    const normalizedEstimatedHours =
+      parseEstimatedHoursInput(nextEstimatedHours);
+
+    if (normalizedEstimatedHours === undefined) {
+      toast.error(
+        "duration must be between 15 minutes and 24 hours (for example: 15m, 1h, 1h 30m).",
+      );
+      return;
+    }
+
+    if (
+      normalizeEstimatedHours(todo.estimatedHours) === normalizedEstimatedHours
+    ) {
+      return;
+    }
+
+    setPendingTodoId(todo.id);
+    try {
+      await apiClient.updateTodo(todo.id, {
+        estimatedHours: normalizedEstimatedHours,
+      });
+      await refreshTodos();
+    } catch (error) {
+      toastApiError(error);
+    } finally {
+      setPendingTodoId(null);
+    }
+  };
+
+  const updateTodoTimeBlockStart = async (
+    todo: TodoItem,
+    nextTimeBlockInput: string,
+  ) => {
+    const trimmed = nextTimeBlockInput.trim();
+    const normalizedTimeBlockStart = (() => {
+      if (trimmed.length === 0) {
+        return null;
+      }
+
+      if (/^\d{2}:\d{2}$/.test(trimmed)) {
+        const [hoursText, minutesText] = trimmed.split(":");
+        const hours = Number(hoursText);
+        const minutes = Number(minutesText);
+        if (
+          !Number.isInteger(hours) ||
+          !Number.isInteger(minutes) ||
+          hours < 0 ||
+          hours > 23 ||
+          minutes < 0 ||
+          minutes > 59
+        ) {
+          return undefined;
+        }
+
+        const dateKey =
+          getTodoDateKey(todo.dueDate) ??
+          (typeof todo.timeBlockStart === "number"
+            ? getLocalDateKey(todo.timeBlockStart)
+            : getLocalDateKey(Date.now()));
+        const parsed = Date.parse(`${dateKey}T${trimmed}`);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return undefined;
+        }
+
+        return parsed;
+      }
+
+      const parsed = Date.parse(trimmed);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return undefined;
+      }
+      return parsed;
+    })();
+
+    if (normalizedTimeBlockStart === undefined) {
+      toast.error("time block start must be a valid local date and time.");
+      return;
+    }
+
+    if ((todo.timeBlockStart ?? null) === normalizedTimeBlockStart) {
+      return;
+    }
+
+    setPendingTodoId(todo.id);
+    try {
+      await apiClient.updateTodo(todo.id, {
+        timeBlockStart: normalizedTimeBlockStart,
+      });
+      await refreshTodos();
+    } catch (error) {
+      toastApiError(error);
     } finally {
       setPendingTodoId(null);
     }
@@ -1067,7 +1888,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       });
       await refreshTodos();
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toastApiError(error);
     } finally {
       setPendingTodoId(null);
     }
@@ -1086,7 +1907,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       });
       await refreshTodos();
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toastApiError(error);
     } finally {
       setPendingTodoId(null);
     }
@@ -1124,7 +1945,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       await apiClient.updateTodo(todo.id, { title: nextTitle });
       await refreshTodos();
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toastApiError(error);
       setTodos((previousTodos) =>
         sortTodos(
           previousTodos.map((item) =>
@@ -1143,6 +1964,73 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     }
   };
 
+  const updateTodoLinks = async (todo: TodoItem) => {
+    const parsed = parseTodoLinksInput(editingLinksInput);
+    const currentLinks = getTodoResourceLinks(todo.notes).map(
+      (link) => link.url,
+    );
+    const nextLinksText = parsed.links.join(", ");
+
+    if (areStringListsEqual(parsed.links, currentLinks)) {
+      if (editingLinksInput.trim() !== nextLinksText) {
+        setEditingLinksInput(nextLinksText);
+      }
+      return;
+    }
+
+    const description = stripTodoLinksFromNotes(todo.notes);
+    const nextNotes = buildTodoNotesWithLinks(description, parsed.links);
+    const previousNotes = todo.notes;
+
+    if ((nextNotes ?? null) === (previousNotes ?? null)) {
+      if (editingLinksInput.trim() !== nextLinksText) {
+        setEditingLinksInput(nextLinksText);
+      }
+      return;
+    }
+
+    setPendingTodoId(todo.id);
+    setEditingLinksInput(nextLinksText);
+    setTodos((previousTodos) =>
+      sortTodos(
+        previousTodos.map((item) =>
+          item.id === todo.id
+            ? {
+                ...item,
+                notes: nextNotes,
+              }
+            : item,
+        ),
+      ),
+    );
+
+    try {
+      await apiClient.updateTodo(todo.id, { notes: nextNotes });
+      await refreshTodos();
+
+      if (parsed.invalidCount > 0) {
+        toast.message("some invalid links were ignored");
+      }
+    } catch (error) {
+      toastApiError(error);
+      setTodos((previousTodos) =>
+        sortTodos(
+          previousTodos.map((item) =>
+            item.id === todo.id
+              ? {
+                  ...item,
+                  notes: previousNotes,
+                }
+              : item,
+          ),
+        ),
+      );
+      setEditingLinksInput(getTodoLinksInputValue(previousNotes));
+    } finally {
+      setPendingTodoId(null);
+    }
+  };
+
   const confirmDeleteTodo = async () => {
     if (!todoPendingDelete) {
       return;
@@ -1155,6 +2043,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       setEditingTodoId((current) => {
         if (current === targetTodo.id) {
           setEditingTitleInput("");
+          setEditingLinksInput("");
           return null;
         }
 
@@ -1164,7 +2053,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       toast.message("todo deleted");
       await refreshTodos();
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toastApiError(error);
     } finally {
       setPendingTodoId(null);
     }
@@ -1179,13 +2068,45 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
     const todayIds = new Set(dueToday.map((todo) => todo.id));
 
     return {
-      today: dueToday,
-      upcoming: openTodos.filter((todo) => !todayIds.has(todo.id)),
-      archive: todos.filter((todo) => todo.status === "done"),
+      today: [...dueToday].sort(compareByPriorityAndStartTime),
+      upcoming: [...openTodos]
+        .filter((todo) => !todayIds.has(todo.id))
+        .sort(compareByPriorityAndStartTime),
+      archive: [...todos]
+        .filter((todo) => todo.status === "done")
+        .sort(compareByPriorityAndStartTime),
     };
   }, [todos]);
 
+  const zenNowTodo = useMemo(() => {
+    const openTodos = todos.filter(
+      (todo) => todo.status === "open" && todo.id !== justCompletedZenTodoId,
+    );
+    if (openTodos.length === 0) {
+      return null;
+    }
+
+    return [...openTodos].sort(compareByPriorityAndStartTime)[0] ?? null;
+  }, [justCompletedZenTodoId, todos]);
+
+  useEffect(() => {
+    if (!justCompletedZenTodoId) {
+      return;
+    }
+
+    const stillOpen = todos.some(
+      (todo) => todo.id === justCompletedZenTodoId && todo.status === "open",
+    );
+    if (!stillOpen) {
+      setJustCompletedZenTodoId(null);
+    }
+  }, [justCompletedZenTodoId, todos]);
+
   const filteredTodos = useMemo(() => {
+    if (filter === "zen") {
+      return zenNowTodo ? [zenNowTodo] : [];
+    }
+
     if (filter === "today") {
       return groupedTodos.today;
     }
@@ -1194,19 +2115,33 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       return groupedTodos.upcoming;
     }
 
-    return groupedTodos.archive;
-  }, [filter, groupedTodos]);
+    if (filter === "archive") {
+      return groupedTodos.archive;
+    }
+
+    return groupedTodos.today;
+  }, [filter, groupedTodos, zenNowTodo]);
 
   const todoSections = useMemo<TodoSection[]>(() => {
+    if (filter === "zen") {
+      return [];
+    }
+
     if (filter === "today") {
       return ([1, 2, 3] as TodoPriority[])
-        .map((priority) => ({
-          key: `today-p${priority}`,
-          label: TODAY_PRIORITY_LABELS[priority],
-          todos: filteredTodos.filter(
-            (todo) => normalizeTodoPriority(todo.priority) === priority,
-          ),
-        }))
+        .map((priority) => {
+          const sectionTodos = filteredTodos
+            .filter((todo) => normalizeTodoPriority(todo.priority) === priority)
+            .sort(compareByPriorityAndStartTime);
+
+          return {
+            key: `today-p${priority}`,
+            label: `${TODAY_PRIORITY_LABELS[priority]} // ${formatSectionHoursLabel(
+              sectionTodos,
+            )}`,
+            todos: sectionTodos,
+          };
+        })
         .filter((section) => section.todos.length > 0);
     }
 
@@ -1251,10 +2186,12 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
       })
       .map(([key, section]) => ({
         key,
-        label: formatSectionDateLabel(section.dateKey, filter, Date.now()),
-        todos: section.todos,
+        label: `${formatSectionDateLabel(section.dateKey, filter, Date.now())} // ${formatSectionHoursLabel(section.todos)}`,
+        todos: section.todos.sort(compareByPriorityAndStartTime),
       }));
   }, [filter, filteredTodos]);
+  const showTaskDetails = true;
+  const showZenView = filter === "zen";
 
   if (!isAuthenticated) {
     return (
@@ -1280,71 +2217,100 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
           </SidebarHeader>
           <SidebarContent>
             <SidebarGroup>
-              <SidebarGroupLabel>views</SidebarGroupLabel>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={filter === "today"}
-                    onClick={() => setActiveFilter("today")}
-                    className="group-data-[collapsible=icon]:justify-center"
-                  >
-                    <span className="group-data-[collapsible=icon]:hidden">
-                      today
-                    </span>
-                    <span className="hidden group-data-[collapsible=icon]:inline">
-                      {"\\"}
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={filter === "upcoming"}
-                    onClick={() => setActiveFilter("upcoming")}
-                    className="group-data-[collapsible=icon]:justify-center"
-                  >
-                    <span className="group-data-[collapsible=icon]:hidden">
-                      upcoming
-                    </span>
-                    <span className="hidden group-data-[collapsible=icon]:inline">
-                      /
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={filter === "archive"}
-                    onClick={() => setActiveFilter("archive")}
-                    className="group-data-[collapsible=icon]:justify-center"
-                  >
-                    <span className="group-data-[collapsible=icon]:hidden">
-                      archive
-                    </span>
-                    <span className="hidden group-data-[collapsible=icon]:inline">
-                      [
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    render={<Link href="/settings" prefetch={false} />}
-                    className="group-data-[collapsible=icon]:justify-center"
-                  >
-                    <span className="group-data-[collapsible=icon]:hidden">
-                      settings
-                    </span>
-                    <span className="hidden group-data-[collapsible=icon]:inline">
-                      ]
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
+              <SidebarGroupLabel>focus</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={filter === "zen"}
+                      onClick={() => setActiveFilter("zen")}
+                      className="group-data-[collapsible=icon]:justify-center"
+                      title="alt+z"
+                    >
+                      <span className="group-data-[collapsible=icon]:hidden">
+                        zen
+                      </span>
+                      <span className="hidden group-data-[collapsible=icon]:inline">
+                        t
+                      </span>
+                    </SidebarMenuButton>
+                    <SidebarMenuBadge>{zenNowTodo ? 1 : 0}</SidebarMenuBadge>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={filter === "today"}
+                      onClick={() => setActiveFilter("today")}
+                      className="group-data-[collapsible=icon]:justify-center"
+                    >
+                      <span className="group-data-[collapsible=icon]:hidden">
+                        today
+                      </span>
+                      <span className="hidden group-data-[collapsible=icon]:inline">
+                        {"\\"}
+                      </span>
+                    </SidebarMenuButton>
+                    <SidebarMenuBadge>
+                      {groupedTodos.today.length}
+                    </SidebarMenuBadge>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={filter === "upcoming"}
+                      onClick={() => setActiveFilter("upcoming")}
+                      className="group-data-[collapsible=icon]:justify-center"
+                    >
+                      <span className="group-data-[collapsible=icon]:hidden">
+                        upcoming
+                      </span>
+                      <span className="hidden group-data-[collapsible=icon]:inline">
+                        /
+                      </span>
+                    </SidebarMenuButton>
+                    <SidebarMenuBadge>
+                      {groupedTodos.upcoming.length}
+                    </SidebarMenuBadge>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={filter === "archive"}
+                      onClick={() => setActiveFilter("archive")}
+                      className="group-data-[collapsible=icon]:justify-center"
+                    >
+                      <span className="group-data-[collapsible=icon]:hidden">
+                        archive
+                      </span>
+                      <span className="hidden group-data-[collapsible=icon]:inline">
+                        [
+                      </span>
+                    </SidebarMenuButton>
+                    <SidebarMenuBadge>
+                      {groupedTodos.archive.length}
+                    </SidebarMenuBadge>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            <SidebarGroup>
+              <SidebarGroupLabel>workspace</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      render={<Link href="/settings" prefetch={false} />}
+                      className="group-data-[collapsible=icon]:justify-center"
+                    >
+                      <span className="group-data-[collapsible=icon]:hidden">
+                        settings
+                      </span>
+                      <span className="hidden group-data-[collapsible=icon]:inline">
+                        ]
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
             </SidebarGroup>
           </SidebarContent>
-          <SidebarFooter>
-            <p className="px-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-              {getLocalStatusLabel(currentTimestamp)}
-            </p>
-          </SidebarFooter>
           <SidebarRail />
         </Sidebar>
 
@@ -1361,7 +2327,7 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
                 ref={promptInputRef}
                 value={promptInput}
                 onChange={(event) => setPromptInput(event.target.value)}
-                placeholder="type once, generate todos"
+                placeholder="type once, ibx can create, update, schedule"
                 autoFocus={promptAutofocus}
                 className="h-8 border-0 bg-transparent lowercase text-[0.8rem]! px-0 shadow-none ring-0 focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
                 onKeyDown={(event) => {
@@ -1387,11 +2353,42 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
             </div>
           </header>
 
-          <main className="min-h-0 flex-1 overflow-y-auto py-4">
+          <main
+            className={cn(
+              "min-h-0 flex-1 overflow-y-auto",
+              showZenView ? "grid place-items-center px-4 md:px-6" : "py-4",
+            )}
+          >
             {!hasLoadedTodos && isLoadingTodos ? (
               <p className="px-4 text-sm text-muted-foreground md:px-6">
                 loading todos…
               </p>
+            ) : showZenView ? (
+              zenNowTodo ? (
+                <section className="mx-auto flex w-full max-w-3xl flex-col items-center text-center">
+                  <p className="text-xs text-muted-foreground">
+                    zen //{" "}
+                    {formatEstimatedHoursInput(zenNowTodo.estimatedHours) ||
+                      "unsized"}
+                  </p>
+                  <p className="mt-4 text-2xl leading-tight tracking-tight lowercase md:text-3xl">
+                    {zenNowTodo.title}
+                  </p>
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => void updateTodoStatus(zenNowTodo, true)}
+                      disabled={pendingTodoId === zenNowTodo.id}
+                    >
+                      done
+                    </Button>
+                  </div>
+                </section>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  no todo ready for now.
+                </p>
+              )
             ) : filteredTodos.length === 0 ? (
               <p className="px-4 text-sm text-muted-foreground md:px-6">
                 no todos in this view yet.
@@ -1411,329 +2408,522 @@ export function AppShell({ initialAuthenticated }: AppShellProps) {
                         {section.label}
                       </p>
                     ) : null}
-                    {section.todos.map((todo, index) => (
-                      <article
-                        key={todo.id}
-                        className={cn(
-                          "relative cursor-pointer overflow-hidden border-b select-none",
-                          index === 0 && "border-t",
-                          todo.status === "done" &&
-                            "bg-neutral-100 dark:bg-neutral-900/90 dark:border-neutral-800",
-                        )}
-                        onClick={() => {
-                          if (suppressNextClickRef.current) {
-                            suppressNextClickRef.current = false;
-                            return;
-                          }
+                    {section.todos.map((todo, index) => {
+                      const resourceLinks = getTodoResourceLinks(todo.notes);
 
-                          setEditingTodoId((currentTodoId) => {
-                            const isClosing = currentTodoId === todo.id;
-                            setEditingTitleInput(isClosing ? "" : todo.title);
-                            return isClosing ? null : todo.id;
-                          });
-                        }}
-                        onPointerDown={(event) => {
-                          if (
-                            pendingTodoId === todo.id ||
-                            isInteractiveTarget(event.target) ||
-                            (event.pointerType === "mouse" &&
-                              event.button !== 0)
-                          ) {
-                            return;
-                          }
+                      return (
+                        <article
+                          key={todo.id}
+                          data-todo-article-id={todo.id}
+                          className={cn(
+                            "relative cursor-pointer overflow-hidden border-b select-none",
+                            index === 0 && "border-t",
+                            todo.status === "done" &&
+                              "bg-neutral-100 dark:bg-neutral-900/90 dark:border-neutral-800",
+                          )}
+                          onClick={(event) => {
+                            if (suppressNextClickRef.current) {
+                              suppressNextClickRef.current = false;
+                              return;
+                            }
 
-                          cancelHoldInteraction();
-                          heldTodoIdRef.current = todo.id;
-                          holdStartRef.current = {
-                            x: event.clientX,
-                            y: event.clientY,
-                          };
-                          event.currentTarget.setPointerCapture?.(
-                            event.pointerId,
-                          );
-                          setHoldingTodoId(todo.id);
-                          holdStartedAtRef.current = performance.now();
-                          const animateHoldProgress = () => {
+                            if (isInteractiveTarget(event.target)) {
+                              return;
+                            }
+
+                            if (openedEditOnPointerDownTodoIdRef.current === todo.id) {
+                              openedEditOnPointerDownTodoIdRef.current = null;
+                              return;
+                            }
+
+                            setEditingTodoId((currentTodoId) => {
+                              const isClosing = currentTodoId === todo.id;
+                              setEditingTitleInput(isClosing ? "" : todo.title);
+                              setEditingLinksInput(
+                                isClosing
+                                  ? ""
+                                  : getTodoLinksInputValue(todo.notes),
+                              );
+                              return isClosing ? null : todo.id;
+                            });
+                          }}
+                          onPointerDown={(event) => {
                             if (
-                              holdStartedAtRef.current === null ||
-                              heldTodoIdRef.current !== todo.id
+                              pendingTodoId === todo.id ||
+                              isInteractiveTarget(event.target) ||
+                              (event.pointerType === "mouse" &&
+                                event.button !== 0)
                             ) {
                               return;
                             }
 
-                            const elapsed =
-                              performance.now() - holdStartedAtRef.current;
-                            const progress =
-                              elapsed <= HOLD_PROGRESS_DELAY_MS
-                                ? 0
-                                : Math.min(
-                                    1,
-                                    (elapsed - HOLD_PROGRESS_DELAY_MS) /
-                                      HOLD_PROGRESS_SWEEP_MS,
-                                  );
-                            setHoldProgress(progress);
-
-                            if (progress < 1) {
-                              holdAnimationFrameRef.current =
-                                window.requestAnimationFrame(
-                                  animateHoldProgress,
-                                );
+                            if (editingTodoId !== todo.id) {
+                              openedEditOnPointerDownTodoIdRef.current = todo.id;
+                              setEditingTodoId(todo.id);
+                              setEditingTitleInput(todo.title);
+                              setEditingLinksInput(
+                                getTodoLinksInputValue(todo.notes),
+                              );
                             }
-                          };
-                          holdAnimationFrameRef.current =
-                            window.requestAnimationFrame(animateHoldProgress);
-                          holdTimerRef.current = window.setTimeout(() => {
-                            suppressNextClickRef.current = true;
-                            void updateTodoStatus(todo, todo.status !== "done");
-                            clearHoldAnimation();
-                            holdStartRef.current = null;
-                            heldTodoIdRef.current = null;
-                          }, HOLD_TO_TOGGLE_MS);
-                        }}
-                        onPointerMove={(event) => {
-                          if (
-                            heldTodoIdRef.current !== todo.id ||
-                            !holdStartRef.current
-                          ) {
-                            return;
-                          }
 
-                          const movedX = Math.abs(
-                            event.clientX - holdStartRef.current.x,
-                          );
-                          const movedY = Math.abs(
-                            event.clientY - holdStartRef.current.y,
-                          );
-                          if (
-                            movedX > HOLD_MOVE_CANCEL_PX ||
-                            movedY > HOLD_MOVE_CANCEL_PX
-                          ) {
                             cancelHoldInteraction();
-                          }
-                        }}
-                        onPointerUp={(event) => {
-                          event.currentTarget.releasePointerCapture?.(
-                            event.pointerId,
-                          );
-                          cancelHoldInteraction();
-                        }}
-                        onPointerCancel={(event) => {
-                          event.currentTarget.releasePointerCapture?.(
-                            event.pointerId,
-                          );
-                          cancelHoldInteraction();
-                        }}
-                      >
-                        <div
-                          className="pointer-events-none absolute inset-y-0 left-0 z-0 overflow-hidden"
-                          style={{
-                            width: `${holdProgress * 100}%`,
-                            opacity: holdingTodoId === todo.id ? 1 : 0,
+                            heldTodoIdRef.current = todo.id;
+                            holdStartRef.current = {
+                              x: event.clientX,
+                              y: event.clientY,
+                            };
+                            event.currentTarget.setPointerCapture?.(
+                              event.pointerId,
+                            );
+                            setHoldingTodoId(todo.id);
+                            holdStartedAtRef.current = performance.now();
+                            const animateHoldProgress = () => {
+                              if (
+                                holdStartedAtRef.current === null ||
+                                heldTodoIdRef.current !== todo.id
+                              ) {
+                                return;
+                              }
+
+                              const elapsed =
+                                performance.now() - holdStartedAtRef.current;
+                              const progress =
+                                elapsed <= HOLD_PROGRESS_DELAY_MS
+                                  ? 0
+                                  : Math.min(
+                                      1,
+                                      (elapsed - HOLD_PROGRESS_DELAY_MS) /
+                                        HOLD_PROGRESS_SWEEP_MS,
+                                    );
+                              setHoldProgress(progress);
+
+                              if (progress < 1) {
+                                holdAnimationFrameRef.current =
+                                  window.requestAnimationFrame(
+                                    animateHoldProgress,
+                                  );
+                              }
+                            };
+                            holdAnimationFrameRef.current =
+                              window.requestAnimationFrame(animateHoldProgress);
+                            holdTimerRef.current = window.setTimeout(() => {
+                              suppressNextClickRef.current = true;
+                              void updateTodoStatus(
+                                todo,
+                                todo.status !== "done",
+                              );
+                              clearHoldAnimation();
+                              holdStartRef.current = null;
+                              heldTodoIdRef.current = null;
+                            }, HOLD_TO_TOGGLE_MS);
+                          }}
+                          onPointerMove={(event) => {
+                            if (
+                              heldTodoIdRef.current !== todo.id ||
+                              !holdStartRef.current
+                            ) {
+                              return;
+                            }
+
+                            const movedX = Math.abs(
+                              event.clientX - holdStartRef.current.x,
+                            );
+                            const movedY = Math.abs(
+                              event.clientY - holdStartRef.current.y,
+                            );
+                            if (
+                              movedX > HOLD_MOVE_CANCEL_PX ||
+                              movedY > HOLD_MOVE_CANCEL_PX
+                            ) {
+                              cancelHoldInteraction();
+                            }
+                          }}
+                          onPointerUp={(event) => {
+                            event.currentTarget.releasePointerCapture?.(
+                              event.pointerId,
+                            );
+                            cancelHoldInteraction();
+                          }}
+                          onPointerCancel={(event) => {
+                            event.currentTarget.releasePointerCapture?.(
+                              event.pointerId,
+                            );
+                            cancelHoldInteraction();
                           }}
                         >
-                          <div className="h-full w-full bg-black/18 dark:bg-white/16" />
-                          <div className="absolute inset-y-0 right-0 w-px bg-foreground/45 dark:bg-foreground/60" />
-                        </div>
-                        <div className="relative z-10 flex flex-col gap-2 px-4 py-3 md:px-6">
-                          <div className="flex items-start gap-3">
-                            <div className="flex min-w-0 flex-1 flex-col gap-1">
-                              <div className="flex items-start justify-between gap-2">
-                                <p
-                                  className={cn(
-                                    "text-sm lowercase",
-                                    todo.status === "done" &&
-                                      "line-through opacity-70",
-                                  )}
-                                >
-                                  {todo.title}
-                                </p>
-                              </div>
-                              {todo.notes ? (
-                                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                  <p className="max-w-full break-words lowercase">
-                                    {expandedNoteIds[todo.id]
-                                      ? todo.notes
-                                      : getPreviewNotes(todo.notes)}
-                                  </p>
-                                  {todo.notes.length > NOTE_PREVIEW_LENGTH ? (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-5 px-1 text-[11px] text-muted-foreground hover:text-foreground"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        setExpandedNoteIds((current) => ({
-                                          ...current,
-                                          [todo.id]: !current[todo.id],
-                                        }));
-                                      }}
-                                      onPointerDown={(event) =>
-                                        event.stopPropagation()
-                                      }
-                                    >
-                                      {expandedNoteIds[todo.id]
-                                        ? "less"
-                                        : "more"}
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                              <p className="text-xs text-muted-foreground">
-                                {displayPriority(todo.priority)} / due:{" "}
-                                {displayDueDate(todo.dueDate)} /{" "}
-                                {displayRecurrence(todo.recurrence)}
-                              </p>
-                            </div>
+                          <div
+                            className="pointer-events-none absolute inset-y-0 left-0 z-0 overflow-hidden"
+                            style={{
+                              width: `${holdProgress * 100}%`,
+                              opacity: holdingTodoId === todo.id ? 1 : 0,
+                            }}
+                          >
+                            <div className="h-full w-full bg-black/18 dark:bg-white/16" />
+                            <div className="absolute inset-y-0 right-0 w-px bg-foreground/45 dark:bg-foreground/60" />
                           </div>
-                          {editingTodoId === todo.id ? (
-                            <div
-                              className="ml-0 flex flex-col gap-2 sm:flex-row sm:items-center"
-                              onClick={(event) => event.stopPropagation()}
-                              onPointerDown={(event) => event.stopPropagation()}
-                            >
-                              <Input
-                                value={editingTitleInput}
-                                onChange={(event) =>
-                                  setEditingTitleInput(event.target.value)
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    void updateTodoTitle(todo);
-                                    event.currentTarget.blur();
-                                  }
+                          <div className="relative z-10 flex flex-col gap-2 px-4 py-3 md:px-6">
+                            <div className="flex items-start gap-3">
+                              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  {editingTodoId === todo.id ? (
+                                    <Input
+                                      value={editingTitleInput}
+                                      onChange={(event) =>
+                                        setEditingTitleInput(event.target.value)
+                                      }
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          event.preventDefault();
+                                          void updateTodoTitle(todo);
+                                          event.currentTarget.blur();
+                                        }
 
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    setEditingTitleInput(todo.title);
-                                    event.currentTarget.blur();
-                                  }
-                                }}
-                                onBlur={() => {
-                                  void updateTodoTitle(todo);
-                                }}
-                                className="h-7 w-full lowercase text-[0.8rem] sm:w-72"
-                                disabled={pendingTodoId === todo.id}
-                                maxLength={140}
-                                aria-label="Edit todo title"
-                              />
-                              <Popover>
-                                <PopoverTrigger
-                                  render={
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
+                                        if (event.key === "Escape") {
+                                          event.preventDefault();
+                                          setEditingTitleInput(todo.title);
+                                          event.currentTarget.blur();
+                                        }
+                                      }}
+                                      onBlur={() => {
+                                        void updateTodoTitle(todo);
+                                      }}
                                       className={cn(
-                                        "w-full justify-start sm:w-44",
-                                        !todo.dueDate &&
-                                          "text-muted-foreground",
+                                        "h-auto w-full border-0 bg-transparent px-0 py-0 text-sm lowercase shadow-none ring-0 focus-visible:ring-0",
+                                        todo.status === "done" &&
+                                          "line-through opacity-70",
                                       )}
                                       disabled={pendingTodoId === todo.id}
+                                      maxLength={140}
+                                      aria-label="Edit todo title"
                                     />
-                                  }
-                                >
-                                  {displayDateInputValue(todo.dueDate)}
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto gap-0 rounded-md bg-background p-1 shadow-none">
-                                  <Calendar
-                                    className="rounded-sm border border-border"
-                                    mode="single"
-                                    selected={
-                                      todo.dueDate
-                                        ? (dateKeyToLocalDate(
-                                            getTodoDateKey(todo.dueDate) ?? "",
-                                          ) ?? undefined)
-                                        : undefined
-                                    }
-                                    onSelect={(date) =>
-                                      void updateTodoDate(
-                                        todo,
-                                        date ? format(date, "yyyy-MM-dd") : "",
-                                      )
-                                    }
-                                  />
-                                </PopoverContent>
-                              </Popover>
-                              <ToggleGroup
-                                multiple={false}
-                                value={[String(todo.priority)]}
-                                onValueChange={(values) =>
-                                  void updateTodoPriority(todo, values)
-                                }
-                                variant="default"
-                                size="sm"
-                              >
-                                <ToggleGroupItem
-                                  value="1"
-                                  className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
-                                >
-                                  p1
-                                </ToggleGroupItem>
-                                <ToggleGroupItem
-                                  value="2"
-                                  className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
-                                >
-                                  p2
-                                </ToggleGroupItem>
-                                <ToggleGroupItem
-                                  value="3"
-                                  className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
-                                >
-                                  p3
-                                </ToggleGroupItem>
-                              </ToggleGroup>
-                              <ToggleGroup
-                                multiple={false}
-                                value={[todo.recurrence]}
-                                onValueChange={(values) =>
-                                  void updateTodoRecurrence(todo, values)
-                                }
-                                variant="default"
-                                size="sm"
-                              >
-                                <ToggleGroupItem
-                                  value="none"
-                                  className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
-                                >
-                                  once
-                                </ToggleGroupItem>
-                                <ToggleGroupItem
-                                  value="daily"
-                                  className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
-                                >
-                                  daily
-                                </ToggleGroupItem>
-                                <ToggleGroupItem
-                                  value="weekly"
-                                  className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
-                                >
-                                  weekly
-                                </ToggleGroupItem>
-                                <ToggleGroupItem
-                                  value="monthly"
-                                  className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
-                                >
-                                  monthly
-                                </ToggleGroupItem>
-                              </ToggleGroup>
-                              <Button
-                                type="button"
-                                size="sm"
-                                disabled={pendingTodoId === todo.id}
-                                onClick={() => {
-                                  setTodoPendingDelete(todo);
-                                }}
+                                  ) : (
+                                    <p
+                                      className={cn(
+                                        "text-sm lowercase",
+                                        todo.status === "done" &&
+                                          "line-through opacity-70",
+                                      )}
+                                    >
+                                      {todo.title}
+                                    </p>
+                                  )}
+                                </div>
+                                {showTaskDetails && todo.notes ? (
+                                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                    <p className="max-w-full break-words lowercase">
+                                      {expandedNoteIds[todo.id]
+                                        ? todo.notes
+                                        : getPreviewNotes(todo.notes)}
+                                    </p>
+                                    {todo.notes.length > NOTE_PREVIEW_LENGTH ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-5 px-1 text-[11px] text-muted-foreground hover:text-foreground"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setExpandedNoteIds((current) => ({
+                                            ...current,
+                                            [todo.id]: !current[todo.id],
+                                          }));
+                                        }}
+                                        onPointerDown={(event) =>
+                                          event.stopPropagation()
+                                        }
+                                      >
+                                        {expandedNoteIds[todo.id]
+                                          ? "less"
+                                          : "more"}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {showTaskDetails && resourceLinks.length > 0 ? (
+                                  <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                                    <span>links:</span>
+                                    {resourceLinks.map((link, index) => (
+                                      <span key={link.url} className="lowercase">
+                                        <a
+                                          href={link.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="underline-offset-2 hover:underline hover:text-foreground"
+                                          onClick={(event) =>
+                                            event.stopPropagation()
+                                          }
+                                          onPointerDown={(event) =>
+                                            event.stopPropagation()
+                                          }
+                                        >
+                                          {link.label}
+                                        </a>
+                                        {index < resourceLinks.length - 1 ? ", " : ""}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {showTaskDetails ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    {displayPriority(todo.priority)} /{" "}
+                                    {displayEstimatedHours(todo.estimatedHours)}{" "}
+                                    / due: {displayDueDate(todo.dueDate)} /{" "}
+                                    {displayRecurrence(todo.recurrence)} /{" "}
+                                    {displayTimeBlock(
+                                      todo.timeBlockStart,
+                                      todo.estimatedHours,
+                                    )}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">
+                                    {displayPriority(todo.priority)} /{" "}
+                                    {displayEstimatedHours(todo.estimatedHours)}{" "}
+                                    /{" "}
+                                    {displayTimeBlock(
+                                      todo.timeBlockStart,
+                                      todo.estimatedHours,
+                                    )}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            {editingTodoId === todo.id ? (
+                              <div
+                                className="ml-0 flex flex-col gap-2 sm:flex-row sm:items-center"
+                                onClick={(event) => event.stopPropagation()}
                                 onPointerDown={(event) =>
                                   event.stopPropagation()
                                 }
                               >
-                                delete
-                              </Button>
-                            </div>
-                          ) : null}
-                        </div>
-                      </article>
-                    ))}
+                                <Input
+                                  type="text"
+                                  value={editingLinksInput}
+                                  onChange={(event) =>
+                                    setEditingLinksInput(event.target.value)
+                                  }
+                                  placeholder="https://meet..., https://docs..."
+                                  className="h-7 w-full text-[0.8rem] sm:w-72"
+                                  disabled={pendingTodoId === todo.id}
+                                  onPointerDown={(event) =>
+                                    event.stopPropagation()
+                                  }
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      void updateTodoLinks(todo);
+                                      event.currentTarget.blur();
+                                    }
+
+                                    if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      setEditingLinksInput(
+                                        getTodoLinksInputValue(todo.notes),
+                                      );
+                                      event.currentTarget.blur();
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    void updateTodoLinks(todo);
+                                  }}
+                                  aria-label="Task links"
+                                />
+                                <Popover>
+                                  <PopoverTrigger
+                                    render={
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className={cn(
+                                          "w-full justify-start sm:w-44",
+                                          !todo.dueDate &&
+                                            "text-muted-foreground",
+                                        )}
+                                        disabled={pendingTodoId === todo.id}
+                                      />
+                                    }
+                                  >
+                                    {displayDateInputValue(todo.dueDate)}
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-auto gap-0 rounded-md bg-background p-1 shadow-none">
+                                    <Calendar
+                                      className="rounded-sm border border-border"
+                                      mode="single"
+                                      selected={
+                                        todo.dueDate
+                                          ? (dateKeyToLocalDate(
+                                              getTodoDateKey(todo.dueDate) ??
+                                                "",
+                                            ) ?? undefined)
+                                          : undefined
+                                      }
+                                      onSelect={(date) =>
+                                        void updateTodoDate(
+                                          todo,
+                                          date
+                                            ? format(date, "yyyy-MM-dd")
+                                            : "",
+                                        )
+                                      }
+                                    />
+                                  </PopoverContent>
+                                </Popover>
+                                <Input
+                                  type="text"
+                                  defaultValue={formatEstimatedHoursInput(
+                                    todo.estimatedHours,
+                                  )}
+                                  placeholder="15m / 1h / 1h 30m"
+                                  className="h-7 w-full text-[0.8rem] sm:w-36"
+                                  disabled={pendingTodoId === todo.id}
+                                  onPointerDown={(event) =>
+                                    event.stopPropagation()
+                                  }
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      void updateTodoEstimatedHours(
+                                        todo,
+                                        event.currentTarget.value,
+                                      );
+                                      event.currentTarget.blur();
+                                    }
+                                  }}
+                                  onBlur={(event) => {
+                                    void updateTodoEstimatedHours(
+                                      todo,
+                                      event.currentTarget.value,
+                                    );
+                                  }}
+                                  aria-label="Estimated duration"
+                                />
+                                <Combobox
+                                  items={TIME_BLOCK_CLOCK_OPTIONS}
+                                  value={
+                                    TIME_BLOCK_CLOCK_OPTIONS.find(
+                                      (option) =>
+                                        option.value ===
+                                        displayTimeBlockClockValue(
+                                          todo.timeBlockStart,
+                                        ),
+                                    ) ?? null
+                                  }
+                                  itemToStringValue={(option) => option.label}
+                                  onOpenChange={(open) => {
+                                    if (open) {
+                                      scrollTimeComboboxNearCurrentTime();
+                                    }
+                                  }}
+                                  onValueChange={(option) => {
+                                    void updateTodoTimeBlockStart(
+                                      todo,
+                                      option?.value ?? "",
+                                    );
+                                  }}
+                                >
+                                  <ComboboxInput
+                                    className="w-full border border-input sm:w-36 [&_[data-slot=input-group-control]]:text-[0.8rem]"
+                                    placeholder="--:--"
+                                    disabled={pendingTodoId === todo.id}
+                                  />
+                                  <ComboboxContent
+                                    className="border border-input"
+                                    data-time-block-combobox="1"
+                                  >
+                                    <ComboboxEmpty>no times found.</ComboboxEmpty>
+                                    <ComboboxList>
+                                      {(option) => (
+                                        <ComboboxItem
+                                          key={option.value}
+                                          value={option}
+                                        >
+                                          {option.label}
+                                        </ComboboxItem>
+                                      )}
+                                    </ComboboxList>
+                                  </ComboboxContent>
+                                </Combobox>
+                                <ToggleGroup
+                                  multiple={false}
+                                  value={[String(todo.priority)]}
+                                  onValueChange={(values) =>
+                                    void updateTodoPriority(todo, values)
+                                  }
+                                  variant="default"
+                                  size="sm"
+                                >
+                                  <ToggleGroupItem
+                                    value="1"
+                                    className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
+                                  >
+                                    p1
+                                  </ToggleGroupItem>
+                                  <ToggleGroupItem
+                                    value="2"
+                                    className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
+                                  >
+                                    p2
+                                  </ToggleGroupItem>
+                                  <ToggleGroupItem
+                                    value="3"
+                                    className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
+                                  >
+                                    p3
+                                  </ToggleGroupItem>
+                                </ToggleGroup>
+                                <ToggleGroup
+                                  multiple={false}
+                                  value={[todo.recurrence]}
+                                  onValueChange={(values) =>
+                                    void updateTodoRecurrence(todo, values)
+                                  }
+                                  variant="default"
+                                  size="sm"
+                                >
+                                  <ToggleGroupItem
+                                    value="none"
+                                    className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
+                                  >
+                                    once
+                                  </ToggleGroupItem>
+                                  <ToggleGroupItem
+                                    value="daily"
+                                    className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
+                                  >
+                                    daily
+                                  </ToggleGroupItem>
+                                  <ToggleGroupItem
+                                    value="weekly"
+                                    className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
+                                  >
+                                    weekly
+                                  </ToggleGroupItem>
+                                  <ToggleGroupItem
+                                    value="monthly"
+                                    className="border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
+                                  >
+                                    monthly
+                                  </ToggleGroupItem>
+                                </ToggleGroup>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  disabled={pendingTodoId === todo.id}
+                                  onClick={() => {
+                                    setTodoPendingDelete(todo);
+                                  }}
+                                  onPointerDown={(event) =>
+                                    event.stopPropagation()
+                                  }
+                                >
+                                  delete
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </article>
+                      );
+                    })}
                   </section>
                 ))}
               </div>

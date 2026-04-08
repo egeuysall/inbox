@@ -34,13 +34,13 @@ API key permissions:
 ## Bearer-Key Endpoints
 
 ### `POST /api/todos/generate`
-Generate todos from free text.
+AI todo operator from free text.
 
 Body:
 
 ```json
 {
-  "text": "finish landing page and follow up with Acme this weekend",
+  "text": "put all upcoming tasks to today and schedule them",
   "today": "2026-04-03"
 }
 ```
@@ -48,14 +48,30 @@ Body:
 - `text` required.
 - `today` optional (`YYYY-MM-DD`), used as reference date.
 
+Behavior:
+- AI can create new todos.
+- AI can update existing todos (title, notes, status, due date, hours, time block, priority, recurrence).
+- AI can delete existing todos.
+- For safety, updates/deletes are restricted to existing todo IDs in your account snapshot.
+- Invalid/non-snapshot mutation IDs are ignored server-side and never executed.
+- Delete operations run only when your prompt includes explicit delete intent (for example: "delete/remove/clear").
+
 Example:
 
 ```bash
 curl -sS -X POST "$IBX_BASE_URL/api/todos/generate" \
   -H "Authorization: Bearer $IBX_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"text":"finish landing page and follow up with Acme this weekend"}'
+  -d '{"text":"put all upcoming tasks to today and schedule them"}'
 ```
+
+Response fields:
+- `created`: number of new todos created.
+- `updated`: number of existing todos updated.
+- `deleted`: number of existing todos deleted.
+- `droppedMutationOps`: number of AI update/delete ops discarded because IDs were not in the snapshot.
+- `mode`: `"create"` or `"mutate"`.
+- `message`: optional AI status note.
 
 ### `GET /api/todos`
 List all todos.
@@ -69,11 +85,15 @@ curl -sS "$IBX_BASE_URL/api/todos?today=2026-04-03" \
 ```
 
 ### `PATCH /api/todos/:todoId`
-Update status and/or schedule fields.
+Update an existing todo.
 
 Body fields:
 - `status`: `"open"` or `"done"`
+- `title`: string (required if provided, max 140 chars)
+- `notes`: string or `null` (max 640 chars)
 - `dueDate`: `YYYY-MM-DD` or `null`
+- `estimatedHours`: number between `0.25` and `24` (quarter-hour increments)
+- `timeBlockStart`: unix timestamp in milliseconds or `null`
 - `recurrence`: `"none" | "daily" | "weekly" | "monthly"`
 - `priority`: `1 | 2 | 3`
 
@@ -128,7 +148,33 @@ curl -sS -X POST "$IBX_BASE_URL/api/thoughts/<externalId>/generate" \
   -d '{"today":"2026-04-03"}'
 ```
 
+### `GET /api/calendar/feed-token`
+Get current active ICS feed token metadata (does not return raw token).
+
+```bash
+curl -sS "$IBX_BASE_URL/api/calendar/feed-token" \
+  -H "Authorization: Bearer $IBX_API_KEY"
+```
+
+### `POST /api/calendar/feed-token`
+Rotate calendar feed token and return a new private ICS URL.
+
+```bash
+curl -sS -X POST "$IBX_BASE_URL/api/calendar/feed-token" \
+  -H "Authorization: Bearer $IBX_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### `GET /api/calendar/ics?token=...`
+Read-only ICS feed URL for calendar subscription (private URL token).
+
+```bash
+curl -sS "$IBX_BASE_URL/api/calendar/ics?token=icf_xxx"
+```
+
 ## Notes
 
 - Session-only endpoints (`/api/login`, `/api/logout`, `/api/api-keys*`) are for browser cookie auth, not for bearer-key integrations.
+- Keep ICS feed URLs private; anyone with the tokenized URL can read scheduled open todos.
 - Keep API keys server-side or in trusted environments.

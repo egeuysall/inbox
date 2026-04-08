@@ -12,6 +12,7 @@ import { getEgeContext } from "@/lib/ege-context";
 import { generateTodosFromThought } from "@/lib/ai";
 import { api, convex } from "@/lib/convex-server";
 import { planTodoReconciliation } from "@/lib/todo-planning";
+import type { GenerationPreferences } from "@/lib/types";
 
 const DATE_KEY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const USER_TIMEZONE = "America/Chicago";
@@ -71,6 +72,26 @@ function parseTodayStartUtc(today: unknown) {
   return null;
 }
 
+function parseGenerationPreferences(value: unknown): GenerationPreferences {
+  const source =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+  const autoSchedule = source.autoSchedule !== false;
+  const includeRelevantLinks = source.includeRelevantLinks !== false;
+  const requireTaskDescriptions = source.requireTaskDescriptions !== false;
+  const availabilityNotes =
+    typeof source.availabilityNotes === "string"
+      ? source.availabilityNotes.trim().slice(0, 640) || null
+      : null;
+
+  return {
+    autoSchedule,
+    includeRelevantLinks,
+    requireTaskDescriptions,
+    availabilityNotes,
+  };
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ externalId: string }> },
@@ -95,8 +116,11 @@ export async function POST(
     return NextResponse.json({ error: "Invalid thought id." }, { status: 400 });
   }
 
-  const body = (await request.json().catch(() => null)) as { today?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { today?: unknown; preferences?: unknown }
+    | null;
   const todayStartUtc = parseTodayStartUtc(body?.today);
+  const preferences = parseGenerationPreferences(body?.preferences);
   const effectiveTodayStartUtc = todayStartUtc ?? getStartOfUserDay(Date.now());
   const todayDateKey = toDateKey(effectiveTodayStartUtc);
 
@@ -128,6 +152,7 @@ export async function POST(
       profileContext,
       recentRunMemories: recentRunMemories.map((memory) => memory.content),
       todayDateKey,
+      preferences,
     });
 
     if (todayStartUtc !== null) {
@@ -144,11 +169,19 @@ export async function POST(
         notes: todo.notes ?? null,
         status: todo.status,
         dueDate: todo.dueDate ?? null,
+        estimatedHours:
+          typeof todo.estimatedHours === "number" ? todo.estimatedHours : null,
+        timeBlockStart:
+          typeof todo.timeBlockStart === "number" ? todo.timeBlockStart : null,
         priority: todo.priority ?? 2,
         recurrence: todo.recurrence ?? "none",
         createdAt: todo.createdAt,
       })),
       effectiveTodayStartUtc,
+      {
+        autoSchedule: preferences.autoSchedule,
+        requireTaskDescriptions: preferences.requireTaskDescriptions,
+      },
     );
 
     if (reconciliationPlan.deleteIds.length > 0) {
@@ -167,6 +200,8 @@ export async function POST(
             title: todo.title,
             notes: todo.notes,
             dueDate: todo.dueDateTimestamp,
+            estimatedHours: todo.estimatedHours,
+            timeBlockStart: todo.timeBlockStart,
             recurrence: todo.recurrence,
             priority: todo.priority,
           }),
@@ -182,6 +217,8 @@ export async function POST(
           title: todo.title,
           notes: todo.notes,
           dueDate: todo.dueDateTimestamp,
+          estimatedHours: todo.estimatedHours,
+          timeBlockStart: todo.timeBlockStart,
           recurrence: todo.recurrence,
           priority: todo.priority,
           source: "ai" as const,

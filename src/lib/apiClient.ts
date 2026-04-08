@@ -1,4 +1,5 @@
 import type {
+  GenerationPreferences,
   SyncThoughtInput,
   ThoughtRecord,
   TodoItem,
@@ -8,6 +9,45 @@ import type {
 } from "@/lib/types";
 
 type ApiErrorPayload = { error?: string };
+type RequestJsonOptions = {
+  timeoutMs?: number;
+};
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+export const UNAUTHORIZED_EVENT_NAME = "ibx:unauthorized";
+
+function parseRetryAfterSeconds(retryAfterHeader: string | null) {
+  if (!retryAfterHeader) {
+    return undefined;
+  }
+
+  const asSeconds = Number.parseInt(retryAfterHeader, 10);
+  if (Number.isFinite(asSeconds) && asSeconds > 0) {
+    return asSeconds;
+  }
+
+  const asDate = Date.parse(retryAfterHeader);
+  if (!Number.isFinite(asDate)) {
+    return undefined;
+  }
+
+  const diffSeconds = Math.ceil((asDate - Date.now()) / 1000);
+  return diffSeconds > 0 ? diffSeconds : undefined;
+}
+
+function emitUnauthorizedEvent(message?: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(UNAUTHORIZED_EVENT_NAME, {
+      detail: {
+        message,
+      },
+    }),
+  );
+}
 
 function getLocalDateKey() {
   const now = new Date();
@@ -19,28 +59,81 @@ function getLocalDateKey() {
 
 export class ApiError extends Error {
   status: number;
+  retryAfterSeconds?: number;
+  isNetworkError: boolean;
+  isTimeout: boolean;
 
-  constructor(message: string, status: number) {
+  constructor(
+    message: string,
+    status: number,
+    options: {
+      retryAfterSeconds?: number;
+      isNetworkError?: boolean;
+      isTimeout?: boolean;
+    } = {},
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.retryAfterSeconds = options.retryAfterSeconds;
+    this.isNetworkError = options.isNetworkError ?? false;
+    this.isTimeout = options.isTimeout ?? false;
   }
 }
 
-async function requestJson<T>(input: string, init?: RequestInit) {
-  const response = await fetch(input, {
-    credentials: "include",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+async function requestJson<T>(
+  input: string,
+  init?: RequestInit,
+  options: RequestJsonOptions = {},
+) {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => {
+    timeoutController.abort("timeout");
+  }, timeoutMs);
 
+  let response: Response;
+  try {
+    response = await fetch(input, {
+      credentials: "include",
+      ...init,
+      signal: timeoutController.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch {
+    const timedOut = timeoutController.signal.aborted;
+    if (timedOut) {
+      throw new ApiError("Request timed out. Please try again.", 0, {
+        isNetworkError: true,
+        isTimeout: true,
+      });
+    }
+
+    throw new ApiError(
+      "Network error. Check your connection and try again.",
+      0,
+      { isNetworkError: true },
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const retryAfterSeconds = parseRetryAfterSeconds(
+    response.headers.get("retry-after"),
+  );
   const json = (await response.json().catch(() => ({}))) as T & ApiErrorPayload;
 
   if (!response.ok) {
-    throw new ApiError(json.error || "Request failed.", response.status);
+    if (response.status === 401) {
+      emitUnauthorizedEvent(json.error);
+    }
+
+    throw new ApiError(json.error || "Request failed.", response.status, {
+      retryAfterSeconds,
+    });
   }
 
   return json as T;
@@ -92,13 +185,16 @@ export const apiClient = {
     });
   },
 
-  async generateTodos(externalId: string) {
+  async generateTodos(
+    externalId: string,
+    preferences?: GenerationPreferences,
+  ) {
     const today = getLocalDateKey();
     return requestJson<{ ok: true; created: number }>(
       `/api/thoughts/${externalId}/generate`,
       {
         method: "POST",
-        body: JSON.stringify({ today }),
+        body: JSON.stringify({ today, preferences }),
       },
     );
   },
@@ -110,11 +206,23 @@ export const apiClient = {
     });
   },
 
-  async generateTodosFromInput(text: string) {
+  async generateTodosFromInput(
+    text: string,
+    preferences?: GenerationPreferences,
+  ) {
     const today = getLocalDateKey();
-    return requestJson<{ ok: true; runId: string; created: number }>("/api/todos/generate", {
+    return requestJson<{
+      ok: true;
+      runId: string;
+      created: number;
+      updated?: number;
+      deleted?: number;
+      droppedMutationOps?: number;
+      mode?: "create" | "mutate";
+      message?: string | null;
+    }>("/api/todos/generate", {
       method: "POST",
-      body: JSON.stringify({ text, today }),
+      body: JSON.stringify({ text, today, preferences }),
     });
   },
 
@@ -156,14 +264,48 @@ export const apiClient = {
     });
   },
 
+  async getCalendarFeedStatus() {
+    return requestJson<{
+      activeFeed: {
+        id: string;
+        name: string;
+        prefix: string;
+        last4: string;
+        createdAt: number;
+      } | null;
+    }>("/api/calendar/feed-token", {
+      method: "GET",
+    });
+  },
+
+  async rotateCalendarFeedToken() {
+    return requestJson<{
+      ok: true;
+      feedUrl: string;
+      feed: {
+        id: string;
+        name: string;
+        prefix: string;
+        last4: string;
+        createdAt: number;
+      };
+    }>("/api/calendar/feed-token", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
   async updateTodo(
     todoId: string,
     payload: {
       status?: TodoStatus;
       dueDate?: string | null;
+      estimatedHours?: number | null;
+      timeBlockStart?: number | null;
       recurrence?: TodoRecurrence;
       priority?: TodoPriority;
       title?: string;
+      notes?: string | null;
     },
   ) {
     return requestJson<{ ok: true }>(`/api/todos/${todoId}`, {

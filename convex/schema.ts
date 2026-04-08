@@ -46,6 +46,8 @@ export default defineSchema({
     notes: v.union(v.string(), v.null()),
     status: v.union(v.literal("open"), v.literal("done")),
     dueDate: v.optional(v.union(v.number(), v.null())),
+    estimatedHours: v.optional(v.union(v.number(), v.null())),
+    timeBlockStart: v.optional(v.union(v.number(), v.null())),
     priority: v.optional(v.union(v.literal(1), v.literal(2), v.literal(3))),
     recurrence: v.optional(
       v.union(

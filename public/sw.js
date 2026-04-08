@@ -1,4 +1,4 @@
-const CACHE_VERSION = "ibx-shell-v4";
+const CACHE_VERSION = "ibx-shell-v5";
 const SHELL_FILES = ["/", "/manifest.webmanifest", "/favicon.ico"];
 
 self.addEventListener("install", (event) => {
@@ -111,5 +111,76 @@ self.addEventListener("fetch", (event) => {
           .catch(() => new Response("Offline", { status: 503 }));
       }),
     ),
+  );
+});
+
+self.addEventListener("push", (event) => {
+  const payload = (() => {
+    if (!event.data) {
+      return null;
+    }
+
+    try {
+      return event.data.json();
+    } catch {
+      return {
+        body: event.data.text(),
+      };
+    }
+  })();
+
+  const title =
+    typeof payload?.title === "string" && payload.title.trim().length > 0
+      ? payload.title
+      : "ibx reminder";
+  const body =
+    typeof payload?.body === "string" && payload.body.trim().length > 0
+      ? payload.body
+      : "A scheduled task is ready.";
+  const tag =
+    typeof payload?.tag === "string" && payload.tag.trim().length > 0
+      ? payload.tag
+      : "ibx-task";
+  const targetUrl =
+    typeof payload?.url === "string" && payload.url.length > 0
+      ? payload.url
+      : "/?view=today";
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag,
+      data: {
+        url: targetUrl,
+      },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  const targetUrl =
+    typeof data?.url === "string" && data.url.length > 0
+      ? data.url
+      : "/?view=today";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ("focus" in client) {
+          if ("navigate" in client) {
+            return client.navigate(targetUrl).then(() => client.focus());
+          }
+          return client.focus();
+        }
+      }
+
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+
+      return undefined;
+    }),
   );
 });

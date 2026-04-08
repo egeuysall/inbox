@@ -47,6 +47,10 @@ export async function GET(request: NextRequest) {
       notes: todo.notes,
       status: todo.status,
       dueDate: todo.dueDate ?? null,
+      estimatedHours:
+        typeof todo.estimatedHours === "number" ? todo.estimatedHours : null,
+      timeBlockStart:
+        typeof todo.timeBlockStart === "number" ? todo.timeBlockStart : null,
       priority: todo.priority ?? 2,
       recurrence: todo.recurrence ?? "none",
       source: todo.source ?? "manual",
