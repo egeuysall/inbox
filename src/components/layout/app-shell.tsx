@@ -84,7 +84,7 @@ const PROMPT_AUTOFOCUS_STORAGE_KEY = "ibx:prompt-autofocus";
 const TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY = "ibx:time-block-notifications";
 const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
 const DEFAULT_AVAILABILITY_NOTES =
-  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average; prefer short realistic estimates (15-30 minutes for quick tasks).";
+  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average, but only use 15-30 minutes for truly quick admin tasks; deep work should usually stay 45-120 minutes.";
 const DEFAULT_EXECUTION_SPEED_MULTIPLIER = 4;
 const SHORTCUT_CAPTURE_KEY_PREFIX = "ibx:shortcut-capture:";
 const NOTE_PREVIEW_LENGTH = 160;
@@ -123,6 +123,15 @@ const TIME_BLOCK_CLOCK_OPTIONS = Array.from({ length: 96 }, (_, index) => {
 
   return { value, label: label.toLowerCase() };
 });
+
+function normalizeAvailabilityNotes(value: string | null | undefined) {
+  const base = value?.trim()?.slice(0, 640) || DEFAULT_AVAILABILITY_NOTES;
+  if (/\b10:30\b|\b22:30\b/i.test(base)) {
+    return base;
+  }
+
+  return `${base}${base.endsWith(".") ? "" : "."} Hard stop at 10:30 PM daily.`;
+}
 
 function getNearestQuarterHourIndex(date: Date) {
   const totalMinutes = date.getHours() * 60 + date.getMinutes();
@@ -235,8 +244,7 @@ function readStoredGenerationPreferences(): GenerationPreferences {
       autoSchedule: true,
       includeRelevantLinks: true,
       requireTaskDescriptions: true,
-      availabilityNotes:
-        availabilityNotes?.trim()?.slice(0, 640) || DEFAULT_AVAILABILITY_NOTES,
+      availabilityNotes: normalizeAvailabilityNotes(availabilityNotes),
       executionSpeedMultiplier: DEFAULT_EXECUTION_SPEED_MULTIPLIER,
     };
   } catch {

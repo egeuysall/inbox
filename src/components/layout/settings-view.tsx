@@ -34,7 +34,7 @@ const TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY = "ibx:time-block-notifications";
 const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
 const CALENDAR_FEED_URL_STORAGE_KEY = "ibx:calendar-feed-url";
 const DEFAULT_AVAILABILITY_NOTES =
-  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average; prefer short realistic estimates (15-30 minutes for quick tasks).";
+  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average, but only use 15-30 minutes for truly quick admin tasks; deep work should usually stay 45-120 minutes.";
 const PICKER_ITEM_CLASS =
   "border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background";
 const CLI_INSTALL_COMMAND =
@@ -106,7 +106,12 @@ function readStoredAvailabilityNotes() {
 
   try {
     const stored = window.localStorage.getItem(AI_AVAILABILITY_NOTES_STORAGE_KEY);
-    return stored?.trim() ? stored.slice(0, 640) : DEFAULT_AVAILABILITY_NOTES;
+    const base = stored?.trim() ? stored.slice(0, 640) : DEFAULT_AVAILABILITY_NOTES;
+    if (/\b10:30\b|\b22:30\b/i.test(base)) {
+      return base;
+    }
+
+    return `${base}${base.endsWith(".") ? "" : "."} Hard stop at 10:30 PM daily.`;
   } catch {
     return DEFAULT_AVAILABILITY_NOTES;
   }

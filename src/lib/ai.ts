@@ -160,14 +160,46 @@ function applyExecutionSpeedMultiplier(hours: number, executionSpeedMultiplier: 
 
 function defaultEstimatedHoursForPriority(priority: 1 | 2 | 3) {
   if (priority === 1) {
-    return 2;
+    return 2.5;
   }
 
   if (priority === 2) {
-    return 1;
+    return 1.5;
   }
 
-  return 0.5;
+  return 1;
+}
+
+function applyExecutionSpeedMultiplierWithMinimum(
+  hours: number,
+  executionSpeedMultiplier: number,
+  minHours: number,
+) {
+  return Math.max(
+    minHours,
+    applyExecutionSpeedMultiplier(hours, executionSpeedMultiplier),
+  );
+}
+
+function parseExplicitDurationFromText(text: string) {
+  const compactMatch = text.match(/\b(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*m)?\b/);
+  if (compactMatch) {
+    const hours = Number(compactMatch[1]);
+    const minutes = compactMatch[2] ? Number(compactMatch[2]) : 0;
+    const total = hours + minutes / 60;
+    return normalizeEstimatedHours(total);
+  }
+
+  const hoursMatch = text.match(/\b(\d+(?:\.\d+)?)\s*(hour|hours|hr|hrs)\b/);
+  const minutesMatch = text.match(/\b(\d{1,3})\s*(minute|minutes|min|mins|m)\b/);
+  if (!hoursMatch && !minutesMatch) {
+    return null;
+  }
+
+  const total =
+    (hoursMatch ? Number(hoursMatch[1]) : 0) +
+    (minutesMatch ? Number(minutesMatch[1]) / 60 : 0);
+  return normalizeEstimatedHours(total);
 }
 
 function inferEstimatedHoursForTask(
@@ -177,21 +209,66 @@ function inferEstimatedHoursForTask(
   executionSpeedMultiplier: number,
 ) {
   const normalized = `${title} ${notes ?? ""}`.toLowerCase();
+  const explicitDuration = parseExplicitDurationFromText(normalized);
+  if (explicitDuration) {
+    return explicitDuration;
+  }
+
   if (
-    /(math|homework|hw|email|reply|message|check|review|search|youtube|watch|call|text)\b/.test(
+    /\b(ryva|gtm|outreach|campaign|implement|build|code|coding|refactor|debug|diagnos|investigat|architect|feature|api|database|schema|migration|integration|performance|security|research|analysis|draft|write|spec|proposal)\b/.test(
       normalized,
     )
   ) {
-    return 0.25;
+    const baseHoursByPriority: Record<1 | 2 | 3, number> = {
+      1: 4,
+      2: 3,
+      3: 2,
+    };
+    return applyExecutionSpeedMultiplierWithMinimum(
+      baseHoursByPriority[priority],
+      executionSpeedMultiplier,
+      0.75,
+    );
   }
 
-  if (/(draft|write|study|prep|analy|research|debug|fix)\b/.test(normalized)) {
-    return 0.5;
+  if (
+    /\b(math|homework|study|practice|review|prep|analy|read|watch|learn)\b/.test(
+      normalized,
+    )
+  ) {
+    const baseHoursByPriority: Record<1 | 2 | 3, number> = {
+      1: 2.5,
+      2: 2,
+      3: 1.5,
+    };
+    return applyExecutionSpeedMultiplierWithMinimum(
+      baseHoursByPriority[priority],
+      executionSpeedMultiplier,
+      0.5,
+    );
   }
 
-  return applyExecutionSpeedMultiplier(
+  if (
+    /\b(email|reply|message|text|dm|ping|confirm|submit|upload|copy|paste|bookmark|quick|minor|small|tiny|15m|15 min)\b/.test(
+      normalized,
+    )
+  ) {
+    const baseHoursByPriority: Record<1 | 2 | 3, number> = {
+      1: 1,
+      2: 0.75,
+      3: 0.5,
+    };
+    return applyExecutionSpeedMultiplierWithMinimum(
+      baseHoursByPriority[priority],
+      executionSpeedMultiplier,
+      0.25,
+    );
+  }
+
+  return applyExecutionSpeedMultiplierWithMinimum(
     defaultEstimatedHoursForPriority(priority),
     executionSpeedMultiplier,
+    0.5,
   );
 }
 
@@ -705,7 +782,8 @@ Rules:
   - Wednesday, Thursday, Friday: unavailable before 17:00.
   - Sunday: avoid 11:00-12:00 and 19:00-20:00.
   - Hard stop at 22:30 daily.
-- User execution profile: estimates should assume user works about ${executionSpeedMultiplier}x faster than average.
+- User execution profile: estimates should assume user works about ${executionSpeedMultiplier}x faster than average, but do not collapse non-trivial work to 15 minutes.
+- Use 15-30 minutes only for explicitly quick admin tasks; deep work (Ryva/GTM, coding, debugging, research, writing) should usually stay 45-120+ minutes.
 - For schedule/reschedule/prioritize intents, include estimatedHours updates for affected tasks.
 - ${
     availabilityNotes
@@ -880,7 +958,8 @@ Rules:
   - Saturday: generally free.
   - Sunday: avoid 11:00-12:00 and 19:00-20:00 (meetings).
 - Hard stop at 22:30 daily.
-- User execution profile: assumes user works about ${executionSpeedMultiplier}x faster than average, so prefer compact realistic estimates.
+- User execution profile: assumes user works about ${executionSpeedMultiplier}x faster than average, but do not collapse non-trivial work to 15 minutes.
+- Use 15-30 minutes only for explicitly quick admin tasks; deep work (Ryva/GTM, coding, debugging, research, writing) should usually stay 45-120+ minutes.
 	- Do not schedule outside these constraints unless the user explicitly asks.
 	- ${
     availabilityNotes

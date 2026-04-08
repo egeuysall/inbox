@@ -23,8 +23,17 @@ const AI_INCLUDE_LINKS_STORAGE_KEY = "ibx:ai-include-links";
 const AI_REQUIRE_DESCRIPTIONS_STORAGE_KEY = "ibx:ai-require-descriptions";
 const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
 const DEFAULT_AVAILABILITY_NOTES =
-  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average; prefer short realistic estimates (15-30 minutes for quick tasks).";
+  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average, but only use 15-30 minutes for truly quick admin tasks; deep work should usually stay 45-120 minutes.";
 const DEFAULT_EXECUTION_SPEED_MULTIPLIER = 4;
+
+function normalizeAvailabilityNotes(value: string | null | undefined) {
+  const base = value?.trim()?.slice(0, 640) || DEFAULT_AVAILABILITY_NOTES;
+  if (/\b10:30\b|\b22:30\b/i.test(base)) {
+    return base;
+  }
+
+  return `${base}${base.endsWith(".") ? "" : "."} Hard stop at 10:30 PM daily.`;
+}
 
 function sortThoughts(items: LocalThought[]) {
   return [...items].sort((a, b) => b.createdAt - a.createdAt);
@@ -84,8 +93,7 @@ function readStoredGenerationPreferences(): GenerationPreferences {
         window.localStorage.getItem(AI_INCLUDE_LINKS_STORAGE_KEY) !== "0",
       requireTaskDescriptions:
         window.localStorage.getItem(AI_REQUIRE_DESCRIPTIONS_STORAGE_KEY) !== "0",
-      availabilityNotes:
-        availabilityNotes?.trim()?.slice(0, 640) || DEFAULT_AVAILABILITY_NOTES,
+      availabilityNotes: normalizeAvailabilityNotes(availabilityNotes),
       executionSpeedMultiplier: DEFAULT_EXECUTION_SPEED_MULTIPLIER,
     };
   } catch {
