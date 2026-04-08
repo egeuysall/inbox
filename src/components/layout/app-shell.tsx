@@ -2277,7 +2277,7 @@ export function AppShell({
                         zen
                       </span>
                       <span className="hidden group-data-[collapsible=icon]:inline">
-                        t
+                        {">"}
                       </span>
                     </SidebarMenuButton>
                     <SidebarMenuBadge>{zenNowTodo ? 1 : 0}</SidebarMenuBadge>
