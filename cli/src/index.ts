@@ -61,6 +61,18 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_RETRIES = 2;
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_CHECK_TIMEOUT_MS = 3_500;
+const DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: APP_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const TIME_BLOCK_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: APP_TIMEZONE,
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
 
 const EXIT_CODE = {
   UNKNOWN: 1,
@@ -793,25 +805,24 @@ async function verifyAuth(baseUrl: string, apiKey: string) {
   return payload;
 }
 
-function toStoredDateKey(timestamp: number) {
-  return new Date(timestamp).toISOString().slice(0, 10);
-}
-
 function formatDate(value: number | null) {
   if (value === null) {
     return "no date";
   }
 
-  return toStoredDateKey(value);
+  return getDateKeyInTimezone(value);
 }
 
 function getDateKeyInTimezone(timestamp: number, timeZone = APP_TIMEZONE) {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
+  const formatter =
+    timeZone === APP_TIMEZONE
+      ? DATE_KEY_FORMATTER
+      : new Intl.DateTimeFormat("en-CA", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
   const parts = formatter.formatToParts(new Date(timestamp));
   const year = parts.find((part) => part.type === "year")?.value;
   const month = parts.find((part) => part.type === "month")?.value;
@@ -832,12 +843,7 @@ function formatTimeBlock(value: number | null) {
     return "unscheduled";
   }
 
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: APP_TIMEZONE,
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(new Date(value));
+  return TIME_BLOCK_FORMATTER.format(new Date(value));
 }
 
 function formatHoursHuman(value: number | null) {
@@ -893,7 +899,7 @@ function filterTodosByView(items: TodoItem[], view: ViewMode) {
         (todo) =>
           todo.status === "open" &&
           todo.dueDate !== null &&
-          toStoredDateKey(todo.dueDate) === todayDateKey,
+          getDateKeyInTimezone(todo.dueDate) === todayDateKey,
       ),
     );
   }
@@ -904,7 +910,7 @@ function filterTodosByView(items: TodoItem[], view: ViewMode) {
         (todo) =>
           todo.status === "open" &&
           todo.dueDate !== null &&
-          toStoredDateKey(todo.dueDate) >= todayDateKey,
+          getDateKeyInTimezone(todo.dueDate) >= todayDateKey,
       ),
     );
   }
@@ -1774,10 +1780,9 @@ async function runTodosCommand(parsed: ParsedArgs) {
 
   if (subcommand === "today-done") {
     const todayDateKey = getTodayDateKey();
-    const today = getTodayDateKey();
     const response = await requestJson<{ todos: TodoItem[] }>(
       config,
-      `/api/todos?today=${encodeURIComponent(today)}`,
+      `/api/todos?today=${encodeURIComponent(todayDateKey)}`,
       {
         method: "GET",
       },
@@ -1789,7 +1794,7 @@ async function runTodosCommand(parsed: ParsedArgs) {
         (todo) =>
           todo.status === "done" &&
           todo.dueDate !== null &&
-          toStoredDateKey(todo.dueDate) === todayDateKey,
+          getDateKeyInTimezone(todo.dueDate) === todayDateKey,
       ),
     );
 

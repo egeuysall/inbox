@@ -553,6 +553,13 @@ type TodoResourceLink = {
   label: string;
 };
 
+type TodoDisplayMeta = {
+  description: string | null;
+  descriptionPreview: string | null;
+  links: TodoResourceLink[];
+  linksInputValue: string;
+};
+
 const NOTE_URL_REGEX = /\bhttps?:\/\/[^\s<>()]+/gi;
 const NOTE_DOMAIN_REGEX =
   /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>()]*)?/gi;
@@ -702,6 +709,18 @@ function areStringListsEqual(a: string[], b: string[]) {
   }
 
   return true;
+}
+
+function getTodoDisplayMeta(notes: string | null): TodoDisplayMeta {
+  const links = getTodoResourceLinks(notes);
+  const description = stripTodoLinksFromNotes(notes);
+
+  return {
+    description,
+    descriptionPreview: description ? getPreviewNotes(description) : null,
+    links,
+    linksInputValue: links.map((link) => link.url).join(", "),
+  };
 }
 
 function isInteractiveTarget(target: EventTarget | null) {
@@ -2140,12 +2159,18 @@ export function AppShell({
     }
 
     if (filter === "today") {
+      const byPriority: Record<TodoPriority, TodoItem[]> = {
+        1: [],
+        2: [],
+        3: [],
+      };
+      for (const todo of filteredTodos) {
+        byPriority[normalizeTodoPriority(todo.priority)].push(todo);
+      }
+
       return ([1, 2, 3] as TodoPriority[])
         .map((priority) => {
-          const sectionTodos = filteredTodos
-            .filter((todo) => normalizeTodoPriority(todo.priority) === priority)
-            .sort(compareByPriorityAndStartTime);
-
+          const sectionTodos = byPriority[priority].sort(compareByPriorityAndStartTime);
           return {
             key: `today-p${priority}`,
             label: `${TODAY_PRIORITY_LABELS[priority]} // ${formatSectionHoursLabel(
@@ -2202,6 +2227,15 @@ export function AppShell({
         todos: section.todos.sort(compareByPriorityAndStartTime),
       }));
   }, [filter, filteredTodos]);
+
+  const todoDisplayMetaById = useMemo(() => {
+    const map = new Map<string, TodoDisplayMeta>();
+    for (const todo of filteredTodos) {
+      map.set(todo.id, getTodoDisplayMeta(todo.notes));
+    }
+    return map;
+  }, [filteredTodos]);
+
   const showTaskDetails = true;
   const showZenView = filter === "zen";
 
@@ -2421,18 +2455,19 @@ export function AppShell({
                       </p>
                     ) : null}
                     {section.todos.map((todo, index) => {
-                      const resourceLinks = getTodoResourceLinks(todo.notes);
-                      const notesDescription = stripTodoLinksFromNotes(todo.notes);
-                      const previewNotesDescription = notesDescription
-                        ? getPreviewNotes(notesDescription)
-                        : null;
+                      const todoMeta =
+                        todoDisplayMetaById.get(todo.id) ??
+                        getTodoDisplayMeta(todo.notes);
+                      const resourceLinks = todoMeta.links;
+                      const notesDescription = todoMeta.description;
+                      const previewNotesDescription = todoMeta.descriptionPreview;
 
                       return (
                         <article
                           key={todo.id}
                           data-todo-article-id={todo.id}
                           className={cn(
-                            "relative cursor-pointer overflow-hidden border-b select-none",
+                            "relative cursor-pointer overflow-hidden border-b select-none [content-visibility:auto] [contain-intrinsic-size:0_56px]",
                             index === 0 && "border-t",
                             todo.status === "done" &&
                               "bg-neutral-100 dark:bg-neutral-900/90 dark:border-neutral-800",
@@ -2458,7 +2493,7 @@ export function AppShell({
                               setEditingLinksInput(
                                 isClosing
                                   ? ""
-                                  : getTodoLinksInputValue(todo.notes),
+                                  : todoMeta.linksInputValue,
                               );
                               return isClosing ? null : todo.id;
                             });
@@ -2477,9 +2512,7 @@ export function AppShell({
                               openedEditOnPointerDownTodoIdRef.current = todo.id;
                               setEditingTodoId(todo.id);
                               setEditingTitleInput(todo.title);
-                              setEditingLinksInput(
-                                getTodoLinksInputValue(todo.notes),
-                              );
+                              setEditingLinksInput(todoMeta.linksInputValue);
                             }
 
                             cancelHoldInteraction();
@@ -2732,9 +2765,7 @@ export function AppShell({
 
                                     if (event.key === "Escape") {
                                       event.preventDefault();
-                                      setEditingLinksInput(
-                                        getTodoLinksInputValue(todo.notes),
-                                      );
+                                      setEditingLinksInput(todoMeta.linksInputValue);
                                       event.currentTarget.blur();
                                     }
                                   }}

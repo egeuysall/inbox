@@ -118,16 +118,16 @@ Optional:
 Prerequisites:
 
 - Node.js 20+
-- pnpm 9+
+- Bun 1.3+
 - Convex project/deployment
 
 Install and run:
 
 ```bash
-pnpm install
+bun install
 cp .env.example .env.local
-pnpm dlx convex dev
-pnpm dev
+bunx convex dev
+bun run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000), enter `APP_ACCESS_PASSWORD`, and use the app.
@@ -268,8 +268,8 @@ Available commands:
 Build CLI artifacts:
 
 ```bash
-pnpm cli:build
-pnpm cli:bundle
+bun run cli:build
+bun run cli:bundle
 ```
 
 ## Apple Shortcut
@@ -277,7 +277,7 @@ pnpm cli:bundle
 Build shortcut file:
 
 ```bash
-pnpm shortcut:build
+bun run shortcut:build
 ```
 
 Import one of:
@@ -304,13 +304,13 @@ Shortcut behavior:
 
 From repo root:
 
-- `pnpm dev` → start Next.js dev server
-- `pnpm build` → production build
-- `pnpm start` → run production build
-- `pnpm lint` → ESLint
-- `pnpm cli:build` → build CLI TS output
-- `pnpm cli:bundle` → build downloadable `public/ibx`
-- `pnpm shortcut:build` → generate/copy `.shortcut` file
+- `bun run dev` → start Next.js dev server
+- `bun run build` → production build
+- `bun run start` → run production build
+- `bun run lint` → ESLint
+- `bun run cli:build` → build CLI TS output
+- `bun run cli:bundle` → build downloadable `public/ibx`
+- `bun run shortcut:build` → generate/copy `.shortcut` file
 
 ## Notes
 

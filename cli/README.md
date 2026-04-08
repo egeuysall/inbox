@@ -61,6 +61,6 @@ ibx td
 ## local build
 
 ```bash
-pnpm cli:build
-pnpm cli:bundle
+bun run cli:build
+bun run cli:bundle
 ```
