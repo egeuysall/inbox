@@ -1055,7 +1055,10 @@ export function AppShell({
       );
       const insideOverlay = Boolean(
         target.closest("[data-radix-popper-content-wrapper]") ||
-          target.closest("[data-slot='combobox-content']"),
+          target.closest("[data-slot='combobox-content']") ||
+          target.closest("[data-slot='popover-content']") ||
+          target.closest("[data-slot='calendar']") ||
+          target.closest("[data-slot='popover-trigger']"),
       );
 
       if (insideActiveRow || insideOverlay) {
