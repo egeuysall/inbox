@@ -84,7 +84,8 @@ const PROMPT_AUTOFOCUS_STORAGE_KEY = "ibx:prompt-autofocus";
 const TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY = "ibx:time-block-notifications";
 const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
 const DEFAULT_AVAILABILITY_NOTES =
-  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM.";
+  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average; prefer short realistic estimates (15-30 minutes for quick tasks).";
+const DEFAULT_EXECUTION_SPEED_MULTIPLIER = 4;
 const SHORTCUT_CAPTURE_KEY_PREFIX = "ibx:shortcut-capture:";
 const NOTE_PREVIEW_LENGTH = 160;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -222,6 +223,7 @@ function readStoredGenerationPreferences(): GenerationPreferences {
       includeRelevantLinks: true,
       requireTaskDescriptions: true,
       availabilityNotes: DEFAULT_AVAILABILITY_NOTES,
+      executionSpeedMultiplier: DEFAULT_EXECUTION_SPEED_MULTIPLIER,
     };
   }
 
@@ -235,6 +237,7 @@ function readStoredGenerationPreferences(): GenerationPreferences {
       requireTaskDescriptions: true,
       availabilityNotes:
         availabilityNotes?.trim()?.slice(0, 640) || DEFAULT_AVAILABILITY_NOTES,
+      executionSpeedMultiplier: DEFAULT_EXECUTION_SPEED_MULTIPLIER,
     };
   } catch {
     return {
@@ -242,6 +245,7 @@ function readStoredGenerationPreferences(): GenerationPreferences {
       includeRelevantLinks: true,
       requireTaskDescriptions: true,
       availabilityNotes: DEFAULT_AVAILABILITY_NOTES,
+      executionSpeedMultiplier: DEFAULT_EXECUTION_SPEED_MULTIPLIER,
     };
   }
 }
@@ -564,6 +568,11 @@ function normalizeNoteUrl(rawUrl: string) {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return null;
     }
+    parsed.hash = "";
+    parsed.hostname = parsed.hostname.toLowerCase();
+    if (parsed.pathname === "/") {
+      parsed.pathname = "";
+    }
 
     return parsed.toString();
   } catch {
@@ -656,7 +665,10 @@ function stripTodoLinksFromNotes(notes: string | null) {
   }
 
   const stripped = notes
+    .replace(/\blinks?:\s*/gi, " ")
     .replace(NOTE_URL_REGEX, " ")
+    .replace(NOTE_DOMAIN_REGEX, " ")
+    .replace(/\s*,\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   return stripped || null;
@@ -2410,6 +2422,10 @@ export function AppShell({
                     ) : null}
                     {section.todos.map((todo, index) => {
                       const resourceLinks = getTodoResourceLinks(todo.notes);
+                      const notesDescription = stripTodoLinksFromNotes(todo.notes);
+                      const previewNotesDescription = notesDescription
+                        ? getPreviewNotes(notesDescription)
+                        : null;
 
                       return (
                         <article
@@ -2608,14 +2624,14 @@ export function AppShell({
                                     </p>
                                   )}
                                 </div>
-                                {showTaskDetails && todo.notes ? (
+                                {showTaskDetails && notesDescription ? (
                                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                     <p className="max-w-full break-words lowercase">
                                       {expandedNoteIds[todo.id]
-                                        ? todo.notes
-                                        : getPreviewNotes(todo.notes)}
+                                        ? notesDescription
+                                        : previewNotesDescription}
                                     </p>
-                                    {todo.notes.length > NOTE_PREVIEW_LENGTH ? (
+                                    {notesDescription.length > NOTE_PREVIEW_LENGTH ? (
                                       <Button
                                         variant="ghost"
                                         size="sm"

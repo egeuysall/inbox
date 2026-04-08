@@ -34,7 +34,7 @@ const TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY = "ibx:time-block-notifications";
 const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
 const CALENDAR_FEED_URL_STORAGE_KEY = "ibx:calendar-feed-url";
 const DEFAULT_AVAILABILITY_NOTES =
-  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM.";
+  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average; prefer short realistic estimates (15-30 minutes for quick tasks).";
 const PICKER_ITEM_CLASS =
   "border border-input aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background";
 const CLI_INSTALL_COMMAND =
@@ -817,7 +817,7 @@ export function SettingsView() {
             <section className="border-b px-4 py-4 md:px-6">
               <p className="text-sm">calendar sync (ics)</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                subscribe from google calendar via url. this is read-only and may refresh with delay (up to about 2 hours).
+                subscribe from calendar via url. this is read-only and updates are cached for about 5 minutes on ibx.
               </p>
 
               <div className="mt-3 flex max-w-xl flex-wrap items-center gap-1.5">

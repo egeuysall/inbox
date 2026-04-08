@@ -30,12 +30,15 @@ const DELETE_INTENT_REGEX =
   /\b(delete|remove|clear|drop|erase|trash|wipe)\b/i;
 const SCHEDULE_INTENT_REGEX =
   /\b(schedule|reschedule|time-?block|calendar|slot|move)\b/i;
+const HOURS_INTENT_REGEX =
+  /\b(hours?|estimate|estimated|duration|how long)\b/i;
 const GLOBAL_TASK_TARGET_REGEX =
-  /\b(all(?:\s+my)?\s+tasks?|all\s+todos?|everything)\b/i;
+  /\b((?:all|every)(?:\s+of)?(?:\s+my)?(?:\s+\w+){0,2}\s+(?:tasks?|todos?)|everything)\b/i;
 const TODAY_TARGET_REGEX = /\btoday\b/i;
 const MAX_AGENT_DELETE_OPS = 250;
 const MAX_AGENT_UPDATE_OPS = 250;
 const MAX_AGENT_CREATE_OPS = 100;
+const DEFAULT_EXECUTION_SPEED_MULTIPLIER = 4;
 const USER_TIMEZONE = "America/Chicago";
 const USER_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: USER_TIMEZONE,
@@ -136,12 +139,18 @@ function parseGenerationPreferences(value: unknown): GenerationPreferences {
     typeof source.availabilityNotes === "string"
       ? source.availabilityNotes.trim().slice(0, 640) || null
       : null;
+  const executionSpeedMultiplier =
+    typeof source.executionSpeedMultiplier === "number" &&
+    Number.isFinite(source.executionSpeedMultiplier)
+      ? Math.min(8, Math.max(1, source.executionSpeedMultiplier))
+      : DEFAULT_EXECUTION_SPEED_MULTIPLIER;
 
   return {
     autoSchedule,
     includeRelevantLinks,
     requireTaskDescriptions,
     availabilityNotes,
+    executionSpeedMultiplier,
   };
 }
 
@@ -151,6 +160,10 @@ function hasExplicitDeleteIntent(inputText: string) {
 
 function hasSchedulingIntent(inputText: string) {
   return SCHEDULE_INTENT_REGEX.test(inputText);
+}
+
+function hasHoursIntent(inputText: string) {
+  return HOURS_INTENT_REGEX.test(inputText);
 }
 
 function hasGlobalRescheduleIntent(inputText: string) {
@@ -183,6 +196,39 @@ function defaultEstimatedHoursForPriority(priority: 1 | 2 | 3) {
   }
 
   return 0.5;
+}
+
+function applyExecutionSpeedMultiplier(hours: number, executionSpeedMultiplier: number) {
+  const normalizedMultiplier =
+    Number.isFinite(executionSpeedMultiplier) && executionSpeedMultiplier > 0
+      ? executionSpeedMultiplier
+      : DEFAULT_EXECUTION_SPEED_MULTIPLIER;
+  return Math.max(0.25, Math.round((hours / normalizedMultiplier) * 4) / 4);
+}
+
+function inferEstimatedHoursForTask(
+  title: string,
+  notes: string | null,
+  priority: 1 | 2 | 3,
+  executionSpeedMultiplier: number,
+) {
+  const normalizedText = `${title} ${notes ?? ""}`.toLowerCase();
+  if (
+    /(math|homework|hw|email|reply|message|check|review|search|youtube|watch|call|text)\b/.test(
+      normalizedText,
+    )
+  ) {
+    return 0.25;
+  }
+
+  if (/(draft|write|study|prep|analy|research|debug|fix)\b/.test(normalizedText)) {
+    return 0.5;
+  }
+
+  return applyExecutionSpeedMultiplier(
+    defaultEstimatedHoursForPriority(priority),
+    executionSpeedMultiplier,
+  );
 }
 
 function normalizePriority(priority: 1 | 2 | 3 | null | undefined): 1 | 2 | 3 {
@@ -348,7 +394,10 @@ export async function POST(request: NextRequest) {
 
     const allowDeleteOps = hasExplicitDeleteIntent(inputText);
     const hasScheduleIntent = hasSchedulingIntent(inputText);
+    const hasDurationIntent = hasHoursIntent(inputText);
     const hasGlobalReschedule = hasGlobalRescheduleIntent(inputText);
+    const hasGlobalDurationUpdate =
+      hasDurationIntent && GLOBAL_TASK_TARGET_REGEX.test(inputText);
     const forceTodayScheduling = hasGlobalReschedule && hasForceTodayTarget(inputText);
     const requestedDeleteIds = allowDeleteOps ? agentPlan.deleteIds : [];
     const filteredDeleteIds = requestedDeleteIds.filter((id) =>
@@ -372,6 +421,17 @@ export async function POST(request: NextRequest) {
         }
       }
     }
+    if (hasGlobalDurationUpdate) {
+      for (const todo of existingSnapshot) {
+        if (todo.status !== "open" || deleteIdSet.has(todo.id)) {
+          continue;
+        }
+
+        if (!updateOpsById.has(todo.id)) {
+          updateOpsById.set(todo.id, { id: todo.id });
+        }
+      }
+    }
     const effectiveUpdateOps = Array.from(updateOpsById.values()).slice(
       0,
       MAX_AGENT_UPDATE_OPS,
@@ -385,6 +445,8 @@ export async function POST(request: NextRequest) {
 
     const existingById = new Map(existingSnapshot.map((todo) => [todo.id, todo]));
     const schedulingCandidates: TimeBlockScheduleCandidate[] = [];
+    const inferredEstimatedHoursByUpdateId = new Map<string, number>();
+    const inferredEstimatedHoursByCreateKey = new Map<string, number>();
 
     for (const update of effectiveUpdateOps) {
       const existingTodo = existingById.get(update.id);
@@ -400,7 +462,12 @@ export async function POST(request: NextRequest) {
       const nextPriority = normalizePriority(update.priority ?? existingTodo.priority);
       const nextEstimatedHours =
         normalizeEstimatedHours(update.estimatedHours ?? existingTodo.estimatedHours) ??
-        defaultEstimatedHoursForPriority(nextPriority);
+        inferEstimatedHoursForTask(
+          update.title ?? existingTodo.title,
+          update.notes === undefined ? existingTodo.notes : update.notes,
+          nextPriority,
+          preferences.executionSpeedMultiplier,
+        );
       const parsedDueDate = forceTodayScheduling
         ? effectiveTodayStartUtc
         : update.dueDate === undefined
@@ -412,6 +479,7 @@ export async function POST(request: NextRequest) {
         typeof parsedDueDate === "number" && Number.isFinite(parsedDueDate)
           ? parsedDueDate
           : effectiveTodayStartUtc;
+      inferredEstimatedHoursByUpdateId.set(update.id, nextEstimatedHours);
 
       const touchesSchedulingFields =
         update.timeBlockStart !== undefined ||
@@ -445,7 +513,12 @@ export async function POST(request: NextRequest) {
       const nextPriority = normalizePriority(todo.priority);
       const nextEstimatedHours =
         normalizeEstimatedHours(todo.estimatedHours) ??
-        defaultEstimatedHoursForPriority(nextPriority);
+        inferEstimatedHoursForTask(
+          todo.title,
+          todo.notes,
+          nextPriority,
+          preferences.executionSpeedMultiplier,
+        );
       const parsedDueDate = todo.dueDate
         ? Date.parse(`${todo.dueDate}T00:00:00.000Z`)
         : NaN;
@@ -465,6 +538,7 @@ export async function POST(request: NextRequest) {
         priority: nextPriority,
         timeBlockStart: todo.timeBlockStart,
       });
+      inferredEstimatedHoursByCreateKey.set(`c:${index}`, nextEstimatedHours);
     }
 
     const schedulingBaseTodos: ExistingTodoForPlanning[] = existingSnapshot
@@ -539,8 +613,30 @@ export async function POST(request: NextRequest) {
       }
 
       if (update.estimatedHours !== undefined) {
-        patch.estimatedHours = update.estimatedHours;
-        touched = true;
+        const normalizedEstimatedHours = normalizeEstimatedHours(
+          update.estimatedHours,
+        );
+        if (normalizedEstimatedHours !== null) {
+          patch.estimatedHours = normalizedEstimatedHours;
+          touched = true;
+        } else if (hasScheduleIntent || hasDurationIntent) {
+          const inferredEstimatedHours = inferredEstimatedHoursByUpdateId.get(
+            update.id,
+          );
+          if (typeof inferredEstimatedHours === "number") {
+            patch.estimatedHours = inferredEstimatedHours;
+            touched = true;
+          }
+        } else if (update.estimatedHours === null) {
+          patch.estimatedHours = null;
+          touched = true;
+        }
+      } else if (hasScheduleIntent || hasDurationIntent) {
+        const inferredEstimatedHours = inferredEstimatedHoursByUpdateId.get(update.id);
+        if (typeof inferredEstimatedHours === "number") {
+          patch.estimatedHours = inferredEstimatedHours;
+          touched = true;
+        }
       }
 
       const resolvedTimeBlockStart = resolvedTimeBlocks.get(`u:${update.id}`);
@@ -609,7 +705,9 @@ export async function POST(request: NextRequest) {
             title: todo.title,
             notes: todo.notes,
             dueDate: Number.isFinite(parsedDueDate) ? parsedDueDate : null,
-            estimatedHours: todo.estimatedHours,
+            estimatedHours:
+              inferredEstimatedHoursByCreateKey.get(createKey) ??
+              todo.estimatedHours,
             timeBlockStart:
               hasResolvedCreateTime
                 ? (resolvedTimeBlocks.get(createKey) ?? null)

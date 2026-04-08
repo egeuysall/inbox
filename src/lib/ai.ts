@@ -53,6 +53,7 @@ const MAX_NOTES_LENGTH = 160;
 const MAX_GENERATED_TODOS = 30;
 const MAX_AGENT_UPDATES = 500;
 const MAX_AGENT_DELETES = 500;
+const DEFAULT_EXECUTION_SPEED_MULTIPLIER = 4;
 const CHECKLIST_ITEM_REGEX = /^\s*(?:[-*]\s+|\d+[.)]\s+)(?:\[[ xX]\]\s*)?/;
 
 function estimateIntentCount(rawText: string) {
@@ -140,6 +141,58 @@ function normalizeEstimatedHours(value: unknown) {
   }
 
   return Math.round(value * 4) / 4;
+}
+
+function normalizeExecutionSpeedMultiplier(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_EXECUTION_SPEED_MULTIPLIER;
+  }
+
+  return Math.min(8, Math.max(1, value));
+}
+
+function applyExecutionSpeedMultiplier(hours: number, executionSpeedMultiplier: number) {
+  const normalizedMultiplier = normalizeExecutionSpeedMultiplier(
+    executionSpeedMultiplier,
+  );
+  return Math.max(0.25, Math.round((hours / normalizedMultiplier) * 4) / 4);
+}
+
+function defaultEstimatedHoursForPriority(priority: 1 | 2 | 3) {
+  if (priority === 1) {
+    return 2;
+  }
+
+  if (priority === 2) {
+    return 1;
+  }
+
+  return 0.5;
+}
+
+function inferEstimatedHoursForTask(
+  title: string,
+  notes: string | null | undefined,
+  priority: 1 | 2 | 3,
+  executionSpeedMultiplier: number,
+) {
+  const normalized = `${title} ${notes ?? ""}`.toLowerCase();
+  if (
+    /(math|homework|hw|email|reply|message|check|review|search|youtube|watch|call|text)\b/.test(
+      normalized,
+    )
+  ) {
+    return 0.25;
+  }
+
+  if (/(draft|write|study|prep|analy|research|debug|fix)\b/.test(normalized)) {
+    return 0.5;
+  }
+
+  return applyExecutionSpeedMultiplier(
+    defaultEstimatedHoursForPriority(priority),
+    executionSpeedMultiplier,
+  );
 }
 
 function getUserTimezoneOffsetAt(timestamp: number, timeZone: string) {
@@ -241,6 +294,7 @@ function normalizeTodos(
   value: unknown,
   maxTodos: number,
   requireTaskDescriptions: boolean,
+  executionSpeedMultiplier: number,
 ): AiTodo[] {
   if (!Array.isArray(value)) {
     return [];
@@ -274,7 +328,18 @@ function normalizeTodos(
       ? normalizeNotesDescription(notesSource) ?? fallbackNotesFromTitle(title)
       : normalizeNotesDescription(notesSource);
     const dueDate = normalizeDueDate(dueDateSource);
-    const estimatedHours = normalizeEstimatedHours(estimatedHoursSource);
+    const priority =
+      prioritySource === 1 || prioritySource === 2 || prioritySource === 3
+        ? (prioritySource as AiTodo["priority"])
+        : 2;
+    const estimatedHours =
+      normalizeEstimatedHours(estimatedHoursSource) ??
+      inferEstimatedHoursForTask(
+        title,
+        notes,
+        priority,
+        executionSpeedMultiplier,
+      );
     const timeBlockStart = normalizeTimeBlockStart(
       timeBlockStartSource,
       dueDate,
@@ -285,10 +350,6 @@ function normalizeTodos(
       VALID_RECURRENCE.has(recurrenceSource)
         ? (recurrenceSource as AiTodo["recurrence"])
         : "none";
-    const priority =
-      prioritySource === 1 || prioritySource === 2 || prioritySource === 3
-        ? (prioritySource as AiTodo["priority"])
-        : 2;
 
     items.push({
       title,
@@ -312,6 +373,7 @@ function normalizeTodoUpdateOperations(
   value: unknown,
   existingTodoIds: Set<string>,
   requireTaskDescriptions: boolean,
+  executionSpeedMultiplier: number,
 ) {
   if (!Array.isArray(value)) {
     return [];
@@ -385,7 +447,10 @@ function normalizeTodoUpdateOperations(
           estimatedHoursSource,
         );
         if (normalizedEstimatedHours !== null) {
-          nextUpdate.estimatedHours = normalizedEstimatedHours;
+          nextUpdate.estimatedHours = applyExecutionSpeedMultiplier(
+            normalizedEstimatedHours,
+            executionSpeedMultiplier,
+          );
         }
       }
     }
@@ -565,6 +630,9 @@ export async function generateTodoAgentPlanFromThought(
   const autoSchedule = preferences?.autoSchedule ?? true;
   const includeRelevantLinks = preferences?.includeRelevantLinks ?? true;
   const requireTaskDescriptions = preferences?.requireTaskDescriptions ?? true;
+  const executionSpeedMultiplier = normalizeExecutionSpeedMultiplier(
+    preferences?.executionSpeedMultiplier,
+  );
   const availabilityNotes =
     typeof preferences?.availabilityNotes === "string" &&
     preferences.availabilityNotes.trim().length > 0
@@ -636,6 +704,9 @@ Rules:
   - Monday and Tuesday: unavailable before 18:00.
   - Wednesday, Thursday, Friday: unavailable before 17:00.
   - Sunday: avoid 11:00-12:00 and 19:00-20:00.
+  - Hard stop at 22:30 daily.
+- User execution profile: estimates should assume user works about ${executionSpeedMultiplier}x faster than average.
+- For schedule/reschedule/prioritize intents, include estimatedHours updates for affected tasks.
 - ${
     availabilityNotes
       ? `Additional availability preferences: ${availabilityNotes}.`
@@ -692,11 +763,13 @@ ${existingTodosBlock}`,
     Reflect.get(parsed, "create"),
     maxTodosForPrompt,
     requireTaskDescriptions,
+    executionSpeedMultiplier,
   );
   const update = normalizeTodoUpdateOperations(
     Reflect.get(parsed, "update"),
     existingTodoIds,
     requireTaskDescriptions,
+    executionSpeedMultiplier,
   );
   const deleteIds = normalizeDeleteIds(
     Reflect.get(parsed, "deleteIds"),
@@ -730,6 +803,9 @@ export async function generateTodosFromThought(
   const autoSchedule = preferences?.autoSchedule ?? true;
   const includeRelevantLinks = preferences?.includeRelevantLinks ?? true;
   const requireTaskDescriptions = preferences?.requireTaskDescriptions ?? true;
+  const executionSpeedMultiplier = normalizeExecutionSpeedMultiplier(
+    preferences?.executionSpeedMultiplier,
+  );
   const availabilityNotes =
     typeof preferences?.availabilityNotes === "string" &&
     preferences.availabilityNotes.trim().length > 0
@@ -803,6 +879,8 @@ Rules:
   - Wednesday, Thursday, Friday: unavailable before 17:00 (school until 5pm).
   - Saturday: generally free.
   - Sunday: avoid 11:00-12:00 and 19:00-20:00 (meetings).
+- Hard stop at 22:30 daily.
+- User execution profile: assumes user works about ${executionSpeedMultiplier}x faster than average, so prefer compact realistic estimates.
 	- Do not schedule outside these constraints unless the user explicitly asks.
 	- ${
     availabilityNotes
@@ -847,12 +925,22 @@ ${memoryBlock}`,
   }
 
   if (Array.isArray(parsed)) {
-    return normalizeTodos(parsed, maxTodosForPrompt, requireTaskDescriptions);
+    return normalizeTodos(
+      parsed,
+      maxTodosForPrompt,
+      requireTaskDescriptions,
+      executionSpeedMultiplier,
+    );
   }
 
   if (typeof parsed === "object" && parsed) {
     const nested = Reflect.get(parsed, "todos");
-    return normalizeTodos(nested, maxTodosForPrompt, requireTaskDescriptions);
+    return normalizeTodos(
+      nested,
+      maxTodosForPrompt,
+      requireTaskDescriptions,
+      executionSpeedMultiplier,
+    );
   }
 
   return [];

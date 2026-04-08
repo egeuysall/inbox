@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
       headers: {
         ETag: etag,
         "Cache-Control":
-          "public, max-age=300, s-maxage=7200, stale-while-revalidate=7200",
+          "public, max-age=60, s-maxage=300, stale-while-revalidate=300",
       },
     });
   }
@@ -183,8 +183,8 @@ export async function GET(request: NextRequest) {
       ETag: etag,
       "X-Content-Type-Options": "nosniff",
       "Cache-Control":
-        "public, max-age=300, s-maxage=7200, stale-while-revalidate=7200",
-      "X-PUBLISHED-TTL": "PT2H",
+        "public, max-age=60, s-maxage=300, stale-while-revalidate=300",
+      "X-PUBLISHED-TTL": "PT5M",
     },
   });
 }

@@ -12,6 +12,7 @@ export type GenerationPreferences = {
   includeRelevantLinks: boolean;
   requireTaskDescriptions: boolean;
   availabilityNotes: string | null;
+  executionSpeedMultiplier: number;
 };
 
 export type TodoItem = {

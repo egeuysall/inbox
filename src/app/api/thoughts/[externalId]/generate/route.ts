@@ -15,6 +15,7 @@ import { planTodoReconciliation } from "@/lib/todo-planning";
 import type { GenerationPreferences } from "@/lib/types";
 
 const DATE_KEY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const DEFAULT_EXECUTION_SPEED_MULTIPLIER = 4;
 const USER_TIMEZONE = "America/Chicago";
 const USER_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: USER_TIMEZONE,
@@ -83,12 +84,18 @@ function parseGenerationPreferences(value: unknown): GenerationPreferences {
     typeof source.availabilityNotes === "string"
       ? source.availabilityNotes.trim().slice(0, 640) || null
       : null;
+  const executionSpeedMultiplier =
+    typeof source.executionSpeedMultiplier === "number" &&
+    Number.isFinite(source.executionSpeedMultiplier)
+      ? Math.min(8, Math.max(1, source.executionSpeedMultiplier))
+      : DEFAULT_EXECUTION_SPEED_MULTIPLIER;
 
   return {
     autoSchedule,
     includeRelevantLinks,
     requireTaskDescriptions,
     availabilityNotes,
+    executionSpeedMultiplier,
   };
 }
 

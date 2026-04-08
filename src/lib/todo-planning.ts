@@ -21,6 +21,8 @@ const STOPWORDS = new Set([
   "that",
 ]);
 const USER_TIMEZONE = "America/Chicago";
+const DEFAULT_EXECUTION_SPEED_MULTIPLIER = 4;
+const END_OF_DAY_CUTOFF_MINUTES = 22 * 60 + 30;
 const TZ_PARTS_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: USER_TIMEZONE,
   year: "numeric",
@@ -161,6 +163,35 @@ function defaultEstimatedHoursForPriority(priority: 1 | 2 | 3) {
   return 0.5;
 }
 
+function applyExecutionSpeedMultiplier(hours: number, executionSpeedMultiplier = DEFAULT_EXECUTION_SPEED_MULTIPLIER) {
+  const normalizedMultiplier =
+    Number.isFinite(executionSpeedMultiplier) && executionSpeedMultiplier > 0
+      ? executionSpeedMultiplier
+      : DEFAULT_EXECUTION_SPEED_MULTIPLIER;
+  return Math.max(0.25, Math.round((hours / normalizedMultiplier) * 4) / 4);
+}
+
+function inferEstimatedHoursForTask(
+  title: string,
+  notes: string | null | undefined,
+  priority: 1 | 2 | 3,
+) {
+  const normalized = `${title} ${notes ?? ""}`.toLowerCase();
+  if (
+    /(math|homework|hw|email|reply|message|check|review|search|youtube|watch|call|text)\b/.test(
+      normalized,
+    )
+  ) {
+    return 0.25;
+  }
+
+  if (/(draft|write|study|prep|analy|research|debug|fix)\b/.test(normalized)) {
+    return 0.5;
+  }
+
+  return applyExecutionSpeedMultiplier(defaultEstimatedHoursForPriority(priority));
+}
+
 function sanitizeNotes(notes: string | null | undefined) {
   if (typeof notes !== "string") {
     return null;
@@ -269,24 +300,24 @@ function getAvailabilityWindows(dateKey: string): Array<[number, number]> {
 
   // Mon-Tue unavailable before 6:00 PM.
   if (dayOfWeek === 1 || dayOfWeek === 2) {
-    return [[18 * 60, 24 * 60]];
+    return [[18 * 60, END_OF_DAY_CUTOFF_MINUTES]];
   }
 
   // Wed-Fri unavailable before 5:00 PM.
   if (dayOfWeek >= 3 && dayOfWeek <= 5) {
-    return [[17 * 60, 24 * 60]];
+    return [[17 * 60, END_OF_DAY_CUTOFF_MINUTES]];
   }
 
   // Saturday fully available.
   if (dayOfWeek === 6) {
-    return [[0, 24 * 60]];
+    return [[0, END_OF_DAY_CUTOFF_MINUTES]];
   }
 
   // Sunday fully available except 11:00 AM-12:00 PM and 7:00-8:00 PM.
   return [
     [0, 11 * 60],
     [12 * 60, 19 * 60],
-    [20 * 60, 24 * 60],
+    [20 * 60, END_OF_DAY_CUTOFF_MINUTES],
   ];
 }
 
@@ -405,7 +436,7 @@ function normalizePlannedTodo(
   const priority = normalizePriority(todo.priority);
   const estimatedHours =
     normalizeEstimatedHours(todo.estimatedHours) ??
-    defaultEstimatedHoursForPriority(priority);
+    inferEstimatedHoursForTask(todo.title, todo.notes, priority);
   const timeBlockStart =
     typeof todo.timeBlockStart === "number" && Number.isFinite(todo.timeBlockStart)
       ? todo.timeBlockStart
@@ -505,7 +536,7 @@ export function planTodoReconciliation(
     const normalizedPriority = normalizePriority(todo.priority);
     const normalizedEstimatedHours =
       normalizeEstimatedHours(todo.estimatedHours) ??
-      defaultEstimatedHoursForPriority(normalizedPriority);
+      inferEstimatedHoursForTask(todo.title, todo.notes, normalizedPriority);
     const normalizedTimeBlockStart =
       typeof todo.timeBlockStart === "number" && Number.isFinite(todo.timeBlockStart)
         ? todo.timeBlockStart
@@ -564,7 +595,11 @@ export function planTodoReconciliation(
 
     const estimatedHours =
       normalizeEstimatedHours(todo.estimatedHours) ??
-      defaultEstimatedHoursForPriority(normalizePriority(todo.priority));
+      inferEstimatedHoursForTask(
+        todo.title,
+        todo.notes,
+        normalizePriority(todo.priority),
+      );
     const startMinutes = hourMinute.hour * 60 + hourMinute.minute;
     addBusyInterval(busyByDateKey, dateKey, startMinutes, estimatedHours);
   }
@@ -732,7 +767,11 @@ export function resolveNonOverlappingTimeBlocks(
 
     const estimatedHours =
       normalizeEstimatedHours(todo.estimatedHours) ??
-      defaultEstimatedHoursForPriority(normalizePriority(todo.priority));
+      inferEstimatedHoursForTask(
+        todo.title,
+        todo.notes,
+        normalizePriority(todo.priority),
+      );
     addBusyInterval(
       busyByDateKey,
       dateKey,
@@ -751,7 +790,7 @@ export function resolveNonOverlappingTimeBlocks(
       const priority = normalizePriority(candidate.priority);
       const estimatedHours =
         normalizeEstimatedHours(candidate.estimatedHours) ??
-        defaultEstimatedHoursForPriority(priority);
+        applyExecutionSpeedMultiplier(defaultEstimatedHoursForPriority(priority));
       const dueDateTimestamp =
         typeof candidate.dueDateTimestamp === "number" &&
         Number.isFinite(candidate.dueDateTimestamp)

@@ -23,7 +23,8 @@ const AI_INCLUDE_LINKS_STORAGE_KEY = "ibx:ai-include-links";
 const AI_REQUIRE_DESCRIPTIONS_STORAGE_KEY = "ibx:ai-require-descriptions";
 const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
 const DEFAULT_AVAILABILITY_NOTES =
-  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM.";
+  "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average; prefer short realistic estimates (15-30 minutes for quick tasks).";
+const DEFAULT_EXECUTION_SPEED_MULTIPLIER = 4;
 
 function sortThoughts(items: LocalThought[]) {
   return [...items].sort((a, b) => b.createdAt - a.createdAt);
@@ -71,6 +72,7 @@ function readStoredGenerationPreferences(): GenerationPreferences {
       includeRelevantLinks: true,
       requireTaskDescriptions: true,
       availabilityNotes: DEFAULT_AVAILABILITY_NOTES,
+      executionSpeedMultiplier: DEFAULT_EXECUTION_SPEED_MULTIPLIER,
     };
   }
 
@@ -84,6 +86,7 @@ function readStoredGenerationPreferences(): GenerationPreferences {
         window.localStorage.getItem(AI_REQUIRE_DESCRIPTIONS_STORAGE_KEY) !== "0",
       availabilityNotes:
         availabilityNotes?.trim()?.slice(0, 640) || DEFAULT_AVAILABILITY_NOTES,
+      executionSpeedMultiplier: DEFAULT_EXECUTION_SPEED_MULTIPLIER,
     };
   } catch {
     return {
@@ -91,6 +94,7 @@ function readStoredGenerationPreferences(): GenerationPreferences {
       includeRelevantLinks: true,
       requireTaskDescriptions: true,
       availabilityNotes: DEFAULT_AVAILABILITY_NOTES,
+      executionSpeedMultiplier: DEFAULT_EXECUTION_SPEED_MULTIPLIER,
     };
   }
 }
