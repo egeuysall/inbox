@@ -2260,7 +2260,7 @@ export function AppShell({
 
   return (
     <>
-      <SidebarProvider defaultOpen={false}>
+      <SidebarProvider>
         <Sidebar collapsible="icon">
           <SidebarHeader className="h-12 border-b p-0">
             <div className="flex h-12 items-center justify-between px-3 group-data-[collapsible=icon]:hidden">
