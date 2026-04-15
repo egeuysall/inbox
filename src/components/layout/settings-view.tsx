@@ -31,6 +31,7 @@ import { clearCachedTodos, clearLocalThoughts } from "@/lib/indexedDb";
 const FILTER_STORAGE_KEY = "ibx:active-view";
 const PROMPT_AUTOFOCUS_STORAGE_KEY = "ibx:prompt-autofocus";
 const TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY = "ibx:time-block-notifications";
+const ZEN_MODE_STORAGE_KEY = "ibx:zen-mode";
 const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
 const CALENDAR_FEED_URL_STORAGE_KEY = "ibx:calendar-feed-url";
 const DEFAULT_AVAILABILITY_NOTES =
@@ -99,6 +100,18 @@ function readStoredTimeBlockNotifications() {
   }
 }
 
+function readStoredZenMode() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(ZEN_MODE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function readStoredAvailabilityNotes() {
   if (typeof window === "undefined") {
     return DEFAULT_AVAILABILITY_NOTES;
@@ -146,6 +159,7 @@ export function SettingsView() {
   const [promptAutofocus, setPromptAutofocus] = useState(true);
   const [timeBlockNotificationsEnabled, setTimeBlockNotificationsEnabled] =
     useState(false);
+  const [zenModeEnabled, setZenModeEnabled] = useState(false);
   const [availabilityNotes, setAvailabilityNotes] = useState(
     DEFAULT_AVAILABILITY_NOTES,
   );
@@ -273,6 +287,22 @@ export function SettingsView() {
     toast.message(`prompt autofocus ${nextAutofocus ? "enabled" : "disabled"}`);
   };
 
+  const setZenModeFromGroup = (values: string[]) => {
+    const nextValue = values[0];
+    if (nextValue !== "on" && nextValue !== "off") {
+      return;
+    }
+
+    const nextEnabled = nextValue === "on";
+    setZenModeEnabled(nextEnabled);
+    try {
+      window.localStorage.setItem(ZEN_MODE_STORAGE_KEY, nextEnabled ? "1" : "0");
+    } catch {
+      // Ignore localStorage failures (private mode, blocked storage)
+    }
+    toast.message(`zen mode ${nextEnabled ? "enabled" : "disabled"}`);
+  };
+
   const handleClearQueue = () => {
     startClearTransition(async () => {
       await clearLocalThoughts();
@@ -309,6 +339,7 @@ export function SettingsView() {
     setDefaultView(readStoredDefaultView());
     setPromptAutofocus(readStoredPromptAutofocus());
     setTimeBlockNotificationsEnabled(readStoredTimeBlockNotifications());
+    setZenModeEnabled(readStoredZenMode());
     setAvailabilityNotes(readStoredAvailabilityNotes());
     setCalendarFeedUrl(readStoredCalendarFeedUrl());
     setHasHydratedPreferences(true);
@@ -666,6 +697,25 @@ export function SettingsView() {
                     multiple={false}
                     value={[timeBlockNotificationsEnabled ? "on" : "off"]}
                     onValueChange={setTimeBlockNotificationsFromGroup}
+                    variant="default"
+                    size="sm"
+                    disabled={!hasHydratedPreferences}
+                  >
+                    <ToggleGroupItem value="on" className={PICKER_ITEM_CLASS}>
+                      on
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="off" className={PICKER_ITEM_CLASS}>
+                      off
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <p className="text-xs text-muted-foreground">zen mode</p>
+                  <ToggleGroup
+                    multiple={false}
+                    value={[zenModeEnabled ? "on" : "off"]}
+                    onValueChange={setZenModeFromGroup}
                     variant="default"
                     size="sm"
                     disabled={!hasHydratedPreferences}

@@ -82,6 +82,7 @@ const PROMPT_INPUT_STORAGE_KEY = "ibx:prompt-input";
 const FILTER_STORAGE_KEY = "ibx:active-view";
 const PROMPT_AUTOFOCUS_STORAGE_KEY = "ibx:prompt-autofocus";
 const TIME_BLOCK_NOTIFICATIONS_STORAGE_KEY = "ibx:time-block-notifications";
+const ZEN_MODE_STORAGE_KEY = "ibx:zen-mode";
 const AI_AVAILABILITY_NOTES_STORAGE_KEY = "ibx:ai-availability-notes";
 const DEFAULT_AVAILABILITY_NOTES =
   "Mon-Tue unavailable before 6:00 PM. Wed-Fri unavailable before 5:00 PM. Sunday avoid 11:00 AM-12:00 PM and 7:00-8:00 PM. Hard stop at 10:30 PM daily. I execute about 4x faster than average, but only use 15-30 minutes for truly quick admin tasks; deep work should usually stay 45-120 minutes.";
@@ -222,6 +223,18 @@ function readStoredTimeBlockNotifications() {
     );
   } catch {
     return true;
+  }
+}
+
+function readStoredZenMode() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(ZEN_MODE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
   }
 }
 
@@ -491,6 +504,39 @@ function displayTimeBlock(
   });
 
   return `block: ${startLabel.toLowerCase()} - ${endLabel.toLowerCase()}`;
+}
+
+function displayZenTimeBlock(
+  timestamp: number | null,
+  estimatedHours: number | null,
+) {
+  if (typeof timestamp !== "number") {
+    return "unscheduled";
+  }
+
+  const startDate = new Date(timestamp);
+  const endDate = new Date(
+    timestamp + (normalizeEstimatedHours(estimatedHours) ?? 1) * 60 * 60 * 1000,
+  );
+
+  const startLabel = startDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const endLabel = endDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  return `${startLabel.toLowerCase()} - ${endLabel.toLowerCase()}`;
+}
+
+function displayZenTaskMeta(todo: TodoItem) {
+  const duration = formatEstimatedHoursInput(todo.estimatedHours) || "unsized";
+  return `${duration} // ${displayZenTimeBlock(
+    todo.timeBlockStart,
+    todo.estimatedHours,
+  )}`;
 }
 
 function displayTimeBlockClockValue(timestamp: number | null) {
@@ -966,6 +1012,7 @@ export function AppShell({
   const [filter, setFilter] = useState<TodoFilter>(initialFilter);
   const [timeBlockNotificationsEnabled, setTimeBlockNotificationsEnabled] =
     useState(false);
+  const [zenModeEnabled, setZenModeEnabled] = useState(false);
   const pushUpdatesEnabled = true;
   const [promptInput, setPromptInput] = useState("");
   const [promptAutofocus, setPromptAutofocus] = useState(false);
@@ -1032,6 +1079,7 @@ export function AppShell({
   useEffect(() => {
     setFilter(readStoredFilter());
     setTimeBlockNotificationsEnabled(readStoredTimeBlockNotifications());
+    setZenModeEnabled(readStoredZenMode());
     setPromptInput(readStoredPromptInput());
     setPromptAutofocus(readStoredPromptAutofocus());
     setHasHydratedPreferences(true);
@@ -2451,7 +2499,7 @@ export function AppShell({
               </p>
             ) : (
               <div className="flex flex-col gap-4">
-                {todoSections.map((section) => (
+                {todoSections.map((section, sectionIndex) => (
                   <section
                     key={section.key}
                     className={cn(
@@ -2471,6 +2519,11 @@ export function AppShell({
                       const resourceLinks = todoMeta.links;
                       const notesDescription = todoMeta.description;
                       const previewNotesDescription = todoMeta.descriptionPreview;
+                      const isZenLeadTask =
+                        zenModeEnabled &&
+                        sectionIndex === 0 &&
+                        index === 0 &&
+                        todo.status === "open";
 
                       return (
                         <article
@@ -2479,6 +2532,10 @@ export function AppShell({
                           className={cn(
                             "relative cursor-pointer overflow-hidden border-b select-none [content-visibility:auto] [contain-intrinsic-size:0_56px]",
                             index === 0 && "border-t",
+                            zenModeEnabled &&
+                              "transition-colors [contain-intrinsic-size:0_64px]",
+                            isZenLeadTask &&
+                              "bg-neutral-50/40 dark:bg-neutral-950/50",
                             todo.status === "done" &&
                               "bg-neutral-100 dark:bg-neutral-900/90 dark:border-neutral-800",
                           )}
@@ -2608,7 +2665,12 @@ export function AppShell({
                             <div className="h-full w-full bg-black/18 dark:bg-white/16" />
                             <div className="absolute inset-y-0 right-0 w-px bg-foreground/45 dark:bg-foreground/60" />
                           </div>
-                          <div className="relative z-10 flex flex-col gap-2 px-4 py-3 md:px-6">
+                          <div
+                            className={cn(
+                              "relative z-10 flex flex-col gap-2 px-4 py-3 md:px-6",
+                              zenModeEnabled && "gap-1.5 py-4",
+                            )}
+                          >
                             <div className="flex items-start gap-3">
                               <div className="flex min-w-0 flex-1 flex-col gap-1">
                                 <div className="flex items-start justify-between gap-2">
@@ -2636,6 +2698,10 @@ export function AppShell({
                                       }}
                                       className={cn(
                                         "h-auto w-full border-0 bg-transparent px-0 py-0 text-sm lowercase shadow-none ring-0 focus-visible:ring-0",
+                                        zenModeEnabled &&
+                                          "text-[15px] leading-6 md:text-base",
+                                        isZenLeadTask &&
+                                          "text-foreground/95",
                                         todo.status === "done" &&
                                           "line-through opacity-70",
                                       )}
@@ -2647,6 +2713,10 @@ export function AppShell({
                                     <p
                                       className={cn(
                                         "text-sm lowercase",
+                                        zenModeEnabled &&
+                                          "text-[15px] leading-6 md:text-base",
+                                        isZenLeadTask &&
+                                          "text-foreground/95",
                                         todo.status === "done" &&
                                           "line-through opacity-70",
                                       )}
@@ -2655,7 +2725,9 @@ export function AppShell({
                                     </p>
                                   )}
                                 </div>
-                                {showTaskDetails && notesDescription ? (
+                                {showTaskDetails &&
+                                !zenModeEnabled &&
+                                notesDescription ? (
                                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                     <p className="max-w-full break-words lowercase">
                                       {expandedNoteIds[todo.id]
@@ -2685,7 +2757,9 @@ export function AppShell({
                                     ) : null}
                                   </div>
                                 ) : null}
-                                {showTaskDetails && resourceLinks.length > 0 ? (
+                                {showTaskDetails &&
+                                !zenModeEnabled &&
+                                resourceLinks.length > 0 ? (
                                   <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                                     <span>links:</span>
                                     {resourceLinks.map((link, index) => (
@@ -2710,16 +2784,27 @@ export function AppShell({
                                   </div>
                                 ) : null}
                                 {showTaskDetails ? (
-                                  <p className="text-xs text-muted-foreground">
-                                    {displayPriority(todo.priority)} /{" "}
-                                    {displayEstimatedHours(todo.estimatedHours)}{" "}
-                                    / due: {displayDueDate(todo.dueDate)} /{" "}
-                                    {displayRecurrence(todo.recurrence)} /{" "}
-                                    {displayTimeBlock(
-                                      todo.timeBlockStart,
-                                      todo.estimatedHours,
-                                    )}
-                                  </p>
+                                  zenModeEnabled ? (
+                                    <p
+                                      className={cn(
+                                        "text-[11px] text-muted-foreground lowercase",
+                                        isZenLeadTask && "text-muted-foreground/90",
+                                      )}
+                                    >
+                                      {displayZenTaskMeta(todo)}
+                                    </p>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">
+                                      {displayPriority(todo.priority)} /{" "}
+                                      {displayEstimatedHours(todo.estimatedHours)}{" "}
+                                      / due: {displayDueDate(todo.dueDate)} /{" "}
+                                      {displayRecurrence(todo.recurrence)} /{" "}
+                                      {displayTimeBlock(
+                                        todo.timeBlockStart,
+                                        todo.estimatedHours,
+                                      )}
+                                    </p>
+                                  )
                                 ) : (
                                   <p className="text-xs text-muted-foreground">
                                     {displayPriority(todo.priority)} /{" "}
