@@ -629,7 +629,6 @@ function normalizeNoteUrl(rawUrl: string) {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return null;
     }
-    parsed.hash = "";
     parsed.hostname = parsed.hostname.toLowerCase();
     if (parsed.pathname === "/") {
       parsed.pathname = "";
@@ -668,7 +667,7 @@ function getTodoResourceLinks(notes: string | null): TodoResourceLink[] {
       const parsed = new URL(normalized);
       const path =
         parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "";
-      label = `${parsed.hostname}${path}`.slice(0, 64);
+      label = `${parsed.hostname}${path}`;
     } catch {
       // Keep normalized URL label fallback.
     }
