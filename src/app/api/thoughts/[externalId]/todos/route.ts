@@ -123,7 +123,7 @@ export async function POST(
 
   const title = typeof body?.title === "string" ? body.title.trim().slice(0, 140) : "";
   const notes =
-    typeof body?.notes === "string" ? body.notes.trim().slice(0, 1200) || null : null;
+    typeof body?.notes === "string" ? body.notes.trim().slice(0, 4000) || null : null;
   const dueDateInput = typeof body?.dueDate === "string" ? body.dueDate.trim() : null;
   const recurrenceInput = typeof body?.recurrence === "string" ? body.recurrence : "none";
   const estimatedHoursInput = body?.estimatedHours;

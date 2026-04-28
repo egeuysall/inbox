@@ -9,7 +9,7 @@ import {
 import { api, convex } from "@/lib/convex-server";
 import type { TodoStatus } from "@/lib/types";
 
-const MAX_NOTES_LENGTH = 640;
+const MAX_NOTES_LENGTH = 4_000;
 
 export async function PATCH(
   request: NextRequest,

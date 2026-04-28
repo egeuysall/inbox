@@ -90,7 +90,7 @@ Update an existing todo.
 Body fields:
 - `status`: `"open"` or `"done"`
 - `title`: string (required if provided, max 140 chars)
-- `notes`: string or `null` (max 640 chars)
+- `notes`: string or `null` (max 4000 chars)
 - `dueDate`: `YYYY-MM-DD` or `null`
 - `estimatedHours`: number between `0.25` and `24` (quarter-hour increments)
 - `timeBlockStart`: unix timestamp in milliseconds or `null`
